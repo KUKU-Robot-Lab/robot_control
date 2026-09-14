@@ -1,0 +1,28 @@
+name: dg5f_ros2
+repository: https://github.com/tesollodelto/dg5f_ros2.git
+branch: main
+commit: 9e9af1221cc82e4613a6f18210288f7782b53011
+imported_at: 2026-09-14
+license: BSD-3-Clause
+destination: ros_ws/src/dg5f_ros2
+packages:
+  - dg5f_driver
+  - dg5f_description
+# Replaces the dg5f_driver of the delto_m_ros2 snapshot (UPSTREAM.yaml). The
+# vendor split DG-5F out into its own repository: this driver builds on Humble,
+# Jazzy and Lyrical from one CMakeLists, drops boost for POSIX sockets in the
+# Modbus operator client, and its xacros take base_type:=short for the short
+# base hand now mounted. It still depends on delto_hardware and delto_tcp_comm,
+# which stay in the delto_m_ros2 snapshot.
+replaces:
+  - ros_ws/src/delto_m_ros2/dg5f_driver
+# dg5f_description's URDF joint limits are the driver's older table; the
+# profile takes the hand's limits from the Tesollo CAD release instead
+# (tests/test_profile_limits_match_description.py).
+excluded:
+  - .git/**
+  - .github/**
+  - dg5f_gz/**
+  - dg5f_moveit_config/**
+  - "**/__pycache__/**"
+local_modifications: []

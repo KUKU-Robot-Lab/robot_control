@@ -38,9 +38,13 @@ LIMITS = "ros_ws/src/openarm_description/config/arm/v10/joint_limits.yaml"
 ARM_GROUPS = ("openarm_right_arm", "openarm_left_arm")
 TOLERANCE_RAD = 1e-3
 
-#: The vendored Tesollo description, the hand's equivalent of the arm's
-#: joint_limits.yaml. Snapshot under vendor_metadata/tesollo.
-HAND_DESCRIPTION = "ros_ws/src/delto_m_ros2/dg_description/urdf/dg5f_right.urdf"
+#: The Tesollo CAD release of the hand that is mounted (DG-5F-M, short base) —
+#: the hand's equivalent of the arm's joint_limits.yaml. Not the driver
+#: packages' description: both dg_description and dg5f_ros2's dg5f_description
+#: still carry an older table that disagrees with the CAD release (and the user
+#: manual) on nine joints, and the training asset is built from the CAD release.
+#: The short and default bases share the finger chain, so their limits match.
+HAND_DESCRIPTION = "../repo/tesollo/tesollo_model/dg5f/dg5f_right_short.urdf"
 
 
 @pytest.fixture(scope="module")
