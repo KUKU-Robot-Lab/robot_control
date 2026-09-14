@@ -26,6 +26,38 @@ DROOP = np.array([0.01, 0.005, 0.0, 0.01, 0.0, 0.0, 0.0])
 FAST = ["--settle-sec", "0.1", "--still-sec", "0.1", "--seconds", "1.5"]
 
 
+def _with_gripper(profile):
+    """The profile plus the retired left gripper.
+
+    The robot as built has a DG-5F on the left (2026-09-14) and no gripper, but
+    teach still serves any gripper-shaped group — one joint whose whole stroke
+    is a few centimetres. These tests exercise that shape, so they run against
+    the profile with the gripper it used to declare, values unchanged.
+    """
+    from dataclasses import replace
+
+    from robot_control.profile import Group, Joint
+
+    joint = Joint(canonical="l_hj_gripper_1", source="openarm_left_finger_joint1", sign=1,
+                  unit="rad", lower=0.0, upper=0.044, velocity=0.2, effort=20.0)
+    group = Group(name=GRIPPER, joints=GRIPPER_JOINTS, controller="left_gripper_controller",
+                  moveit_group="left_gripper", action="follow_joint_trajectory")
+    return replace(profile, joints=profile.joints + (joint,),
+                   groups={**profile.groups, GRIPPER: group})
+
+
+@pytest.fixture(autouse=True)
+def gripper_profile(monkeypatch):
+    from robot_control import cli, teach_cli
+    from robot_control.profile import load_builtin_profile
+
+    def load(name):
+        return _with_gripper(load_builtin_profile(name))
+
+    monkeypatch.setattr(cli, "load_builtin_profile", load)
+    monkeypatch.setattr(teach_cli, "load_builtin_profile", load)
+
+
 class FlatChain:
     """A gravity model that always asks for the same small torque."""
 
@@ -108,7 +140,7 @@ def _profile():
         from robot_control.profile import load_builtin_profile
         from robot_control.teach_cli import _with_composites
 
-        PROFILE = _with_composites(load_builtin_profile("openarm_tesollo"))
+        PROFILE = _with_composites(_with_gripper(load_builtin_profile("openarm_tesollo")))
     return PROFILE
 
 

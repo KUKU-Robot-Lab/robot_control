@@ -102,6 +102,9 @@ STALE_LIMIT_SEC = 2.0
 #: Lanes made by joining profile groups that share a controller, by name.
 COMPOSITE_GROUPS = {
     "tesollo_hand": ("tesollo_abduction", "tesollo_curl", "tesollo_pip", "tesollo_dip"),
+    "tesollo_left_hand": (
+        "tesollo_left_abduction", "tesollo_left_curl", "tesollo_left_pip", "tesollo_left_dip",
+    ),
 }
 
 KEY_LOCK = " "

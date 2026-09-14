@@ -17,6 +17,11 @@ from robot_control.identification import (
 from robot_control.profile import load_builtin_profile
 
 REAL_SWEEPS = Path(__file__).parent / "data" / "sweeps"
+#: The robot those sweeps were measured on: a DG-5F right hand and a left
+#: gripper, before both hands became short-base DG-5Fs on 2026-09-14. The files
+#: keep saying so; the regression test below reads them as that robot, because
+#: what it holds still is the arithmetic, not the numbers' fit to today's arm.
+RECORDED_ASSET = "openarm_tesollo_sensor_rl"
 #: Measured on the right arm, 2026-07-28, and recorded here because a
 #: generalised regression that changes them is a regression, not a refactor.
 EXPECTED_STIFFNESS = {
@@ -287,7 +292,8 @@ def test_the_fit_reads_the_applied_torque_rather_than_recomputing_it():
 def test_the_generalised_regression_reproduces_the_measured_estimate(profile):
     from robot_control.artifacts import read_sweep
 
-    sweeps = [read_sweep(path, profile) for path in sorted(REAL_SWEEPS.glob("pose*.json"))]
+    recorded = replace(profile, asset_id=RECORDED_ASSET)
+    sweeps = [read_sweep(path, recorded) for path in sorted(REAL_SWEEPS.glob("pose*.json"))]
 
     estimate = fit_static_gravity(sweeps)
 

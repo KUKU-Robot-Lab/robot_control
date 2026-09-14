@@ -71,10 +71,11 @@ def test_group_contract_matches_vendored_moveit_configuration(srdf):
         for name, group in profile.executable_groups().items()
         if name.startswith("openarm_")
     }
+    # The left gripper left the profile with the gripper itself (2026-09-14); the
+    # vendored SRDF still declares it, which this does not require either way.
     assert set(openarm) == {
         "openarm_right_arm",
         "openarm_left_arm",
-        "openarm_left_gripper",
     }
     for name, group in openarm.items():
         assert group.moveit_group in srdf_groups, name

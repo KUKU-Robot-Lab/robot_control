@@ -19,15 +19,19 @@ def test_openarm_tesollo_profile_has_complete_canonical_contract():
     assert profile.name == "openarm_tesollo"
     assert profile.ros["humble"].command_rate_hz == 100
     assert profile.ros["jazzy"].command_rate_hz == 100
-    assert len(profile.joints) == 35
+    # Two arms and a DG-5F on each (2026-09-14; the left carried a gripper before).
+    assert len(profile.joints) == 54
     assert set(profile.groups) == {
         "openarm_right_arm",
         "openarm_left_arm",
-        "openarm_left_gripper",
         "tesollo_abduction",
         "tesollo_curl",
         "tesollo_pip",
         "tesollo_dip",
+        "tesollo_left_abduction",
+        "tesollo_left_curl",
+        "tesollo_left_pip",
+        "tesollo_left_dip",
     }
     assert set().union(*(set(group.joints) for group in profile.groups.values())) == set(
         profile.joint_names
@@ -47,12 +51,6 @@ def test_group_contract_declares_openarm_controllers_and_moveit_groups():
     assert groups["openarm_left_arm"].action == "follow_joint_trajectory"
     assert groups["openarm_left_arm"].tip_link == "openarm_left_hand_tcp"
 
-    # Humble has no parallel_gripper_action_controller, so every end effector on
-    # this branch — gripper and multi-finger hands alike — takes a trajectory.
-    assert groups["openarm_left_gripper"].controller == "left_gripper_controller"
-    assert groups["openarm_left_gripper"].moveit_group == "left_gripper"
-    assert groups["openarm_left_gripper"].action == "follow_joint_trajectory"
-
 
 def test_group_contract_marks_tesollo_groups_executable_without_moveit():
     profile = load_profile(PROFILE)
@@ -65,12 +63,13 @@ def test_group_contract_marks_tesollo_groups_executable_without_moveit():
         # direct joint values only.
         assert group.moveit_group is None
         assert name in profile.executable_groups()
-        # dg5f_right_driver.launch.py runs its own controller_manager under a
+        # dg5f_{side}_driver.launch.py runs its own controller_manager under a
         # namespace of its own, so both the action and the state it publishes
         # are one level down from the arm's. The plain name belongs to the
         # Gazebo configuration, whose action server the real hand never serves.
-        assert group.controller == "dg5f_right/dg5f_right_controller"
-        assert group.state_topic == "/dg5f_right/joint_states"
+        side = "left" if name.startswith("tesollo_left_") else "right"
+        assert group.controller == f"dg5f_{side}/dg5f_{side}_controller"
+        assert group.state_topic == f"/dg5f_{side}/joint_states"
 
 
 def test_groups_on_the_default_state_topic_say_so_by_leaving_it_unset():

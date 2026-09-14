@@ -80,7 +80,7 @@ def test_profile_declares_the_asset_urdf_and_canonical_tips(profile):
     assert profile.asset_urdf_path is not None
     assert profile.asset_urdf_path.is_file()
     assert profile.groups["openarm_right_arm"].asset_tip_link == "r_hl_palm_ee"
-    assert profile.groups["openarm_left_arm"].asset_tip_link == "l_hl_gripper_tcp"
+    assert profile.groups["openarm_left_arm"].asset_tip_link == "l_hl_palm_ee"
 
 
 def test_the_declared_asset_urdf_builds_every_arm_chain(profile):

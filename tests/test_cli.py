@@ -111,24 +111,6 @@ def test_pose_joints_refuses_a_target_outside_the_profile_limits(capsys):
     assert "position limit" in capsys.readouterr().out
 
 
-def test_the_gripper_can_reach_the_open_state_its_own_srdf_names(capsys):
-    """The robot's own `open` has to be commandable, and once was not.
-
-    The SRDF opens the gripper to 0.044 and the description's finger_joint1
-    stops at 0.044, but the profile bounded it at 0.04, so the gate refused the
-    vendor's own named state. That mismatch is the interesting thing to hold
-    still: this asserts the three agree by exercising the one path that reads
-    all of them. The gate itself is covered above, by a typed target that is
-    genuinely out of range — a named state runs through the same check.
-    """
-    code = main(["pose", "joints", "--group", "openarm_left_gripper", "--named", "open"])
-
-    output = capsys.readouterr().out
-    assert code == 0, output
-    assert "position limit" not in output
-    assert "+0.0440" in output
-
-
 def test_pose_ee_requires_a_target():
     with pytest.raises(SystemExit) as exit_info:
         main(["pose", "ee", *RIGHT_ARM])
@@ -321,12 +303,13 @@ def test_pose_show_reads_a_group_where_that_group_publishes(built_backends, caps
 
 
 def test_pose_show_across_groups_reads_each_of_their_topics(built_backends, capsys):
-    """One subscription cannot serve two topics, so showing everything needs both."""
+    """One subscription cannot serve two topics, so showing everything needs each."""
     main(["pose", "show"])
 
     assert set(b.joint_topic for b in built_backends) == {
         "/joint_states",
         "/dg5f_right/joint_states",
+        "/dg5f_left/joint_states",
     }
 
 

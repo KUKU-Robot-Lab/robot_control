@@ -408,4 +408,9 @@ def test_every_profile_group_declares_where_it_lands_in_hdgp(profile):
     # would fail at export time, which is far from where the name was omitted.
     undeclared = [name for name, g in profile.groups.items() if g.hdgp_group is None]
 
-    assert undeclared == []
+    # The one deliberate gap: hdgp's actuator dicts name only the right hand's
+    # phalanx groups, so the left hand (2026-09-14) has nowhere to land. Naming
+    # a guess would be worse — hdgp answers an unknown group with its default.
+    assert sorted(undeclared) == [
+        "tesollo_left_abduction", "tesollo_left_curl", "tesollo_left_dip", "tesollo_left_pip",
+    ]
