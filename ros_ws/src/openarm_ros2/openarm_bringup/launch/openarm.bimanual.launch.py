@@ -20,6 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription, LaunchContext
 from launch.actions import DeclareLaunchArgument, TimerAction, OpaqueFunction
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -213,6 +214,11 @@ def generate_launch_description():
             default_value="openarm_bimanual_controllers.yaml",
             description="Controllers file to use.",
         ),
+        DeclareLaunchArgument(
+            "use_rviz",
+            default_value="true",
+            description="Start rviz2. The S2R console passes false (the viewer is Isaac Sim).",
+        ),
     ]
 
     description_package = LaunchConfiguration("description_package")
@@ -248,6 +254,7 @@ def generate_launch_description():
         name="rviz2",
         output="log",
         arguments=["-d", rviz_config_file],
+        condition=IfCondition(LaunchConfiguration("use_rviz")),
     )
 
     joint_state_broadcaster_spawner = OpaqueFunction(
