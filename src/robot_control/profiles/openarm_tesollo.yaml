@@ -118,62 +118,64 @@ joints:
   - {canonical: l_aj_5, source: openarm_left_joint5, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
   - {canonical: l_aj_6, source: openarm_left_joint6, sign: 1, unit: rad, lower: -0.785398, upper: 0.785398, velocity: 2.0, effort: 7}
   - {canonical: l_aj_7, source: openarm_left_joint7, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
-  # Ranges from the Tesollo CAD release of the mounted hand
+  # Ranges from the vendor driver package the real hand runs on
+  # (ros_ws/src/dg5f_ros2/dg5f_description/urdf/dg5f_right_short.urdf).
+  # 2026-09-14..09-23 they followed the Tesollo CAD release
   # (repo/tesollo/tesollo_model/dg5f/dg5f_right_short.urdf), which the training
-  # asset is built from and the user manual agrees with. Until 2026-09-14 they
-  # came from dg_description/urdf/dg5f_right.urdf, whose table differs on nine
-  # joints (thumb_1 upper 0.890 vs 1.344, pinky_2 upper 0.611 vs 1.571, ...);
-  # dg5f_ros2's dg5f_description still carries that older table. They are not
+  # asset is built from; the two tables differ on nine joints per hand
+  # (thumb_1 upper 0.890 vs 1.344, pinky_2 upper 0.611 vs 1.571, ...). The
+  # driver is what the real hand enforces, so it wins here; the plan is to port
+  # it into the training URDF/USD later. They are not
   # symmetric: the thumb's second joint only travels negative and the other
   # fingers' only positive, so the +-1.5 placeholder these carried authorized a
   # curl command that drove four fingers into their stops. Velocity is held at
   # the arm's conservative 2.0 rather than the described 3.14, on the same
   # reasoning as the arm.
-  - {canonical: r_hj_thumb_1, source: rj_dg_1_1, sign: 1, unit: rad, lower: -0.383972, upper: 1.343904, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_thumb_2, source: rj_dg_1_2, sign: 1, unit: rad, lower: -2.705260, upper: 0.0, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_thumb_1, source: rj_dg_1_1, sign: 1, unit: rad, lower: -0.383972, upper: 0.890118, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_thumb_2, source: rj_dg_1_2, sign: 1, unit: rad, lower: -3.141593, upper: 0.000000, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_thumb_3, source: rj_dg_1_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_thumb_4, source: rj_dg_1_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_index_1, source: rj_dg_2_1, sign: 1, unit: rad, lower: -0.541052, upper: 0.349066, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_index_2, source: rj_dg_2_2, sign: 1, unit: rad, lower: 0.0, upper: 2.007129, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_index_1, source: rj_dg_2_1, sign: 1, unit: rad, lower: -0.418879, upper: 0.610865, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_index_2, source: rj_dg_2_2, sign: 1, unit: rad, lower: -0.000000, upper: 2.007129, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_index_3, source: rj_dg_2_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_index_4, source: rj_dg_2_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_middle_1, source: rj_dg_3_1, sign: 1, unit: rad, lower: -0.436332, upper: 0.436332, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_middle_2, source: rj_dg_3_2, sign: 1, unit: rad, lower: 0.0, upper: 2.007129, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_middle_1, source: rj_dg_3_1, sign: 1, unit: rad, lower: -0.610865, upper: 0.610865, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_middle_2, source: rj_dg_3_2, sign: 1, unit: rad, lower: 0.000000, upper: 1.954769, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_middle_3, source: rj_dg_3_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_middle_4, source: rj_dg_3_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_ring_1, source: rj_dg_4_1, sign: 1, unit: rad, lower: -0.261799, upper: 0.558505, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_ring_2, source: rj_dg_4_2, sign: 1, unit: rad, lower: 0.0, upper: 1.919862, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_ring_1, source: rj_dg_4_1, sign: 1, unit: rad, lower: -0.610865, upper: 0.418879, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_ring_2, source: rj_dg_4_2, sign: 1, unit: rad, lower: 0.000000, upper: 1.902409, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_ring_3, source: rj_dg_4_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_ring_4, source: rj_dg_4_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   # The pinky is built the other way round: joint 1 is the flexion the other
   # fingers' joint 2 is, and joint 2 the abduction. The group names follow the
   # other four, so tesollo_abduction moves the pinky's flexion joint.
-  - {canonical: r_hj_pinky_1, source: rj_dg_5_1, sign: 1, unit: rad, lower: 0.0, upper: 1.047198, velocity: 2.0, effort: 7.5}
-  - {canonical: r_hj_pinky_2, source: rj_dg_5_2, sign: 1, unit: rad, lower: -0.261799, upper: 1.570796, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_pinky_1, source: rj_dg_5_1, sign: 1, unit: rad, lower: -0.017453, upper: 1.047198, velocity: 2.0, effort: 7.5}
+  - {canonical: r_hj_pinky_2, source: rj_dg_5_2, sign: 1, unit: rad, lower: -0.418879, upper: 0.610865, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_pinky_3, source: rj_dg_5_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: r_hj_pinky_4, source: rj_dg_5_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  # The left hand, from the CAD release's dg5f_left_short.urdf. It is the right
+  # The left hand, from the driver's dg5f_left_short.urdf. It is the right
   # hand reflected, so the joints whose range is not centred on zero have their
   # interval flipped: the left thumb's second joint travels only positive.
   # Until 2026-09-14 these lived in sim2real's config/openarm_tesollo_left_hand.yaml
   # because this profile carried a gripper on the left.
-  - {canonical: l_hj_thumb_1, source: lj_dg_1_1, sign: 1, unit: rad, lower: -1.343904, upper: 0.383972, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_thumb_2, source: lj_dg_1_2, sign: 1, unit: rad, lower: 0.0, upper: 2.705260, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_thumb_1, source: lj_dg_1_1, sign: 1, unit: rad, lower: -0.890118, upper: 0.383972, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_thumb_2, source: lj_dg_1_2, sign: 1, unit: rad, lower: -0.000000, upper: 3.141593, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_thumb_3, source: lj_dg_1_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_thumb_4, source: lj_dg_1_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_index_1, source: lj_dg_2_1, sign: 1, unit: rad, lower: -0.349066, upper: 0.541052, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_index_2, source: lj_dg_2_2, sign: 1, unit: rad, lower: 0.0, upper: 2.007129, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_index_1, source: lj_dg_2_1, sign: 1, unit: rad, lower: -0.610865, upper: 0.418879, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_index_2, source: lj_dg_2_2, sign: 1, unit: rad, lower: -0.000000, upper: 2.007129, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_index_3, source: lj_dg_2_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_index_4, source: lj_dg_2_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_middle_1, source: lj_dg_3_1, sign: 1, unit: rad, lower: -0.436332, upper: 0.436332, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_middle_2, source: lj_dg_3_2, sign: 1, unit: rad, lower: 0.0, upper: 2.007129, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_middle_1, source: lj_dg_3_1, sign: 1, unit: rad, lower: -0.610865, upper: 0.610865, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_middle_2, source: lj_dg_3_2, sign: 1, unit: rad, lower: 0.000000, upper: 1.954769, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_middle_3, source: lj_dg_3_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_middle_4, source: lj_dg_3_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_ring_1, source: lj_dg_4_1, sign: 1, unit: rad, lower: -0.558505, upper: 0.261799, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_ring_2, source: lj_dg_4_2, sign: 1, unit: rad, lower: 0.0, upper: 1.919862, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_ring_1, source: lj_dg_4_1, sign: 1, unit: rad, lower: -0.418879, upper: 0.610865, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_ring_2, source: lj_dg_4_2, sign: 1, unit: rad, lower: 0.000000, upper: 1.902409, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_ring_3, source: lj_dg_4_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_ring_4, source: lj_dg_4_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_pinky_1, source: lj_dg_5_1, sign: 1, unit: rad, lower: -1.047198, upper: 0.0, velocity: 2.0, effort: 7.5}
-  - {canonical: l_hj_pinky_2, source: lj_dg_5_2, sign: 1, unit: rad, lower: -1.570796, upper: 0.261799, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_pinky_1, source: lj_dg_5_1, sign: 1, unit: rad, lower: -1.047198, upper: 0.017453, velocity: 2.0, effort: 7.5}
+  - {canonical: l_hj_pinky_2, source: lj_dg_5_2, sign: 1, unit: rad, lower: -0.610865, upper: 0.418879, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_pinky_3, source: lj_dg_5_3, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}
   - {canonical: l_hj_pinky_4, source: lj_dg_5_4, sign: 1, unit: rad, lower: -1.570796, upper: 1.570796, velocity: 2.0, effort: 7.5}

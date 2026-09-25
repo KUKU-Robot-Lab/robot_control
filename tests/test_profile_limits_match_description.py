@@ -38,13 +38,14 @@ LIMITS = "ros_ws/src/openarm_description/config/arm/v10/joint_limits.yaml"
 ARM_GROUPS = ("openarm_right_arm", "openarm_left_arm")
 TOLERANCE_RAD = 1e-3
 
-#: The Tesollo CAD release of the hand that is mounted (DG-5F-M, short base) —
-#: the hand's equivalent of the arm's joint_limits.yaml. Not the driver
-#: packages' description: both dg_description and dg5f_ros2's dg5f_description
-#: still carry an older table that disagrees with the CAD release (and the user
-#: manual) on nine joints, and the training asset is built from the CAD release.
+#: The vendor driver's description of the hand that is mounted (DG-5F-M, short
+#: base) — the hand's equivalent of the arm's joint_limits.yaml. It disagrees
+#: with the Tesollo CAD release (repo/tesollo/tesollo_model, which the training
+#: asset is built from) on nine joints per hand. Since 2026-09-23 the driver is
+#: the reference, because it is what the real hand enforces; the CAD table is
+#: to be brought in line in the URDF/USD later.
 #: The short and default bases share the finger chain, so their limits match.
-HAND_DESCRIPTION = "../repo/tesollo/tesollo_model/dg5f/dg5f_right_short.urdf"
+HAND_DESCRIPTION = "ros_ws/src/dg5f_ros2/dg5f_description/urdf/dg5f_right_short.urdf"
 
 
 @pytest.fixture(scope="module")
@@ -105,7 +106,7 @@ def test_commanded_speed_stays_within_the_description(profile, described):
         )
 
 
-#: Each hand's groups and the CAD release file its limits come from. The left
+#: Each hand's groups and the driver description file its limits come from. The left
 #: hand is the right reflected, so its off-centre ranges are flipped — checked
 #: against its own file rather than derived, for the same reason the arms are.
 HANDS = {
@@ -115,7 +116,7 @@ HANDS = {
     ),
     "left": (
         ("tesollo_left_abduction", "tesollo_left_curl", "tesollo_left_pip", "tesollo_left_dip"),
-        "../repo/tesollo/tesollo_model/dg5f/dg5f_left_short.urdf",
+        "ros_ws/src/dg5f_ros2/dg5f_description/urdf/dg5f_left_short.urdf",
     ),
 }
 
