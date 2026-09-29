@@ -41,12 +41,66 @@
 
 namespace delto_hardware {
 
+SystemInterface::~SystemInterface() {
+  // The reconnect thread captures `this` and touches delto_client_.
+  stopReconnectThread();
+
+  executor_running_.store(false);
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+}
+
+void SystemInterface::stopReconnectThread() {
+  reconnect_running_.store(false);
+  if (reconnect_thread_.joinable()) {
+    reconnect_thread_.join();
+  }
+  reconnecting_.store(false);
+}
+
+bool SystemInterface::sendZeroDutyLocked() {
+  if (!delto_client_ || !delto_client_->IsConnected()) {
+    return false;
+  }
+  try {
+    std::vector<int> zero_duty(effort_commands_.size(), 0);
+    delto_client_->SendDuty(zero_duty);
+    return true;
+  } catch (const std::exception& e) {
+    RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                "Failed to zero motor duty: %s", e.what());
+    return false;
+  }
+}
+
+void SystemInterface::resetCurrentControlState() {
+  std::fill(current_integral_.begin(), current_integral_.end(), 0.0);
+  std::fill(current_limit_flag_.begin(), current_limit_flag_.end(), 0);
+}
+
+#ifdef DELTO_HW_COMPONENT_PARAMS_ON_INIT
+hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
+    const hardware_interface::HardwareComponentInterfaceParams& params) {
+  if (hardware_interface::SystemInterface::CallbackReturn::SUCCESS !=
+      hardware_interface::SystemInterface::on_init(params)) {
+    return CallbackReturn::ERROR;
+  }
+  return initHardware();
+}
+#else
 hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
     const hardware_interface::HardwareInfo& info) {
   if (hardware_interface::SystemInterface::CallbackReturn::SUCCESS !=
       hardware_interface::SystemInterface::on_init(info)) {
     return CallbackReturn::ERROR;
   }
+  return initHardware();
+}
+#endif
+
+hardware_interface::SystemInterface::CallbackReturn
+SystemInterface::initHardware() {
 
   // Initialize arrays based on joint count
   positions_.resize(info_.joints.size(), 0.0);
@@ -60,9 +114,22 @@ hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
   current_integral_.resize(info_.joints.size(), 0.0);
   motor_dir_.resize(info_.joints.size(), 1);
 
+  // write() scratch buffers, sized once so the update loop never allocates
+  filter_effort_commands_.resize(info_.joints.size(), 0.0);
+  duty_.resize(info_.joints.size(), 0.0);
+  int_duty_.resize(info_.joints.size(), 0);
+  current_mA_.resize(info_.joints.size(), 0);
+
   // Initialize connection status
   connection_status_ = 0.0;
   is_connected_.store(false);
+  reconnecting_.store(false);
+  reconnect_running_.store(false);
+  torque_released_.store(false);
+  stale_read_cycles_ = 0;
+  executor_running_.store(false);
+  firmware_dir_revised_ = false;
+  device_sensor_type_ = DeltoTCP::SensorType::NONE;
 
   // Validate joint interfaces
   for (const hardware_interface::ComponentInfo& joint : info_.joints) {
@@ -72,8 +139,14 @@ hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
       return CallbackReturn::ERROR;
     }
 
-    if (!(joint.state_interfaces[0].name == hardware_interface::HW_IF_POSITION ||
-          joint.state_interfaces[1].name == hardware_interface::HW_IF_VELOCITY)) {
+    // Both are required, and state_interfaces must not be indexed blindly.
+    bool has_position = false;
+    bool has_velocity = false;
+    for (const auto& si : joint.state_interfaces) {
+      if (si.name == hardware_interface::HW_IF_POSITION) has_position = true;
+      if (si.name == hardware_interface::HW_IF_VELOCITY) has_velocity = true;
+    }
+    if (!has_position || !has_velocity) {
       RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"),
                    "Joint '%s' needs position and velocity state interfaces.",
                    joint.name.c_str());
@@ -90,50 +163,74 @@ hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
   io_enabled_ = false;
 
   // Get parameters from hardware info
-  if (info.hardware_parameters.find("delto_ip") != info.hardware_parameters.end()) {
-    delto_ip_ = info.hardware_parameters.at("delto_ip");
+  if (info_.hardware_parameters.find("delto_ip") != info_.hardware_parameters.end()) {
+    delto_ip_ = info_.hardware_parameters.at("delto_ip");
   }
 
-  if (info.hardware_parameters.find("delto_port") != info.hardware_parameters.end()) {
+  if (info_.hardware_parameters.find("delto_port") != info_.hardware_parameters.end()) {
     try {
-      delto_port_ = std::stoi(info.hardware_parameters.at("delto_port"));
+      delto_port_ = std::stoi(info_.hardware_parameters.at("delto_port"));
     } catch (...) {
       RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
                   "Invalid port parameter, using default: %d", delto_port_);
     }
   }
 
-  if (info.hardware_parameters.find("delto_model") != info.hardware_parameters.end()) {
+  if (info_.hardware_parameters.find("delto_model") != info_.hardware_parameters.end()) {
     try {
-      model_ = static_cast<uint16_t>(std::stoi(info.hardware_parameters.at("delto_model")));
+      model_ = static_cast<uint16_t>(
+          std::stoi(info_.hardware_parameters.at("delto_model"),
+                    nullptr, 0));
     } catch (...) {
       RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
                   "Invalid model parameter, using default: 0x%X", model_);
     }
   }
 
-  if (info.hardware_parameters.find("hand_type") != info.hardware_parameters.end()) {
-    hand_type_ = info.hardware_parameters.at("hand_type");
+  if (info_.hardware_parameters.find("hand_type") != info_.hardware_parameters.end()) {
+    hand_type_ = info_.hardware_parameters.at("hand_type");
   }
 
-  if (info.hardware_parameters.find("fingertip_sensor") != info.hardware_parameters.end()) {
-    fingertip_sensor_enabled_ = info.hardware_parameters.at("fingertip_sensor") == "true";
+  if (info_.hardware_parameters.find("fingertip_sensor") != info_.hardware_parameters.end()) {
+    fingertip_sensor_enabled_ = info_.hardware_parameters.at("fingertip_sensor") == "true";
   }
 
-  if (info.hardware_parameters.find("IO") != info.hardware_parameters.end()) {
-    io_enabled_ = info.hardware_parameters.at("IO") == "true";
+  if (info_.hardware_parameters.find("IO") != info_.hardware_parameters.end()) {
+    io_enabled_ = info_.hardware_parameters.at("IO") == "true";
   }
 
   // Initialize model-specific settings
   initModelSpecificSettings();
 
-  RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), 
-              "Delto model: 0x%X, Fingers: %zu, Joints: %zu", 
+  // A mismatch here sizes every duty command wrong and mis-frames every
+  // response, so catch it before a socket is ever opened.
+  if (info_.joints.size() != num_joints_) {
+    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"),
+                 "Joint count mismatch: URDF declares %zu joints but model "
+                 "0x%X has %zu actuators. Check <ros2_control> and the "
+                 "delto_model parameter.",
+                 info_.joints.size(), model_, num_joints_);
+    return CallbackReturn::ERROR;
+  }
+
+  RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
+              "Delto model: 0x%X, Fingers: %zu, Joints: %zu",
               model_, num_fingers_, num_joints_);
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
               "Supports F/T: %s, Supports GPIO: %s",
               supports_ft_sensor_ ? "yes" : "no",
               supports_gpio_ ? "yes" : "no");
+
+  if (io_enabled_ && !supports_gpio_) {
+    RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                "IO:=true requested but model 0x%X has no GPIO hardware; "
+                "GPIO data and services are disabled.", model_);
+  }
+  if (fingertip_sensor_enabled_ && !supports_ft_sensor_) {
+    RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                "fingertip_sensor:=true requested but model 0x%X has no "
+                "fingertip sensor support; sensor data is disabled.", model_);
+  }
 
   // Initialize F/T sensor arrays if supported
   if (supports_ft_sensor_) {
@@ -155,52 +252,69 @@ hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
 
   // Create communication client
   delto_client_ = std::make_unique<DeltoTCP::Communication>(
-      delto_ip_, delto_port_, model_, 
-      fingertip_sensor_enabled_ && supports_ft_sensor_, 
+      delto_ip_, delto_port_, model_,
+      fingertip_sensor_enabled_ && supports_ft_sensor_,
       io_enabled_ && supports_gpio_);
 
   // Try to connect
   try {
-    RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), 
+    RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
                 "Attempting to connect to %s:%d", delto_ip_.c_str(), delto_port_);
     delto_client_->Connect();
     firmware_version_ = delto_client_->GetFirmwareVersion();
-    
+
     if (firmware_version_.size() < 2) {
       RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
                   "Invalid firmware version returned, using default [0, 0]");
       firmware_version_.resize(2, 0);
     }
-    
+
     is_connected_.store(true);
     connection_status_ = 1.0;
-    
+
     // Check firmware compatibility for motor direction
     checkFirmwareCompatibility();
-    
+
     RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
                 "Successfully connected. Firmware: v%d.%d, Motor direction revised: %s",
                 firmware_version_[0], firmware_version_[1],
                 firmware_dir_revised_ ? "yes" : "no");
-                
   } catch (...) {
-    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"), "Connect Failed.");
+    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"),
+                 "Connect Failed to %s:%d. Check that the gripper is powered on and the IP is reachable.",
+                 delto_ip_.c_str(), delto_port_);
     is_connected_.store(false);
     connection_status_ = 0.0;
     return CallbackReturn::FAILURE;
   }
 
-  // Create ROS2 node for services
+  // Get sensor type from device (available after Connect)
+  device_sensor_type_ = delto_client_->GetSensorType();
+
+  // Create ROS2 node for services and publishers
   node_ = rclcpp::Node::make_shared("delto_hardware_interface_node");
 
-  // Create F/T sensor offset service if supported and enabled
-  if (supports_ft_sensor_ && fingertip_sensor_enabled_) {
+  // Create F/T sensor offset service if F/T sensor
+  if (isFTSensor(device_sensor_type_) && fingertip_sensor_enabled_) {
     ft_offset_service_ = node_->create_service<std_srvs::srv::Trigger>(
         "~/set_ft_sensor_offset",
         std::bind(&SystemInterface::ftOffsetCallback, this,
                   std::placeholders::_1, std::placeholders::_2));
     RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
                 "F/T sensor offset service created: ~/set_ft_sensor_offset");
+  }
+
+  // Create tactile image publishers if tactile sensor
+  if ((device_sensor_type_ == DeltoTCP::SensorType::TACTILE_M ||
+       device_sensor_type_ == DeltoTCP::SensorType::TACTILE_S) &&
+      fingertip_sensor_enabled_) {
+    for (size_t i = 0; i < num_fingers_; i++) {
+      std::string topic = "tactile/finger_" + std::to_string(i + 1);
+      auto pub = node_->create_publisher<sensor_msgs::msg::Image>(topic, 10);
+      tactile_publishers_.push_back(pub);
+      RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
+                  "Tactile image publisher created: %s", topic.c_str());
+    }
   }
 
   // Create GPIO services if supported and enabled
@@ -218,14 +332,52 @@ hardware_interface::SystemInterface::CallbackReturn SystemInterface::on_init(
         std::bind(&SystemInterface::gpioOutput3Callback, this,
                   std::placeholders::_1, std::placeholders::_2));
     RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
-                "GPIO services created: ~/set_gpio_output1, ~/set_gpio_output2, ~/set_gpio_output3");
+                "GPIO services created: ~/set_gpio_output1, "
+                "~/set_gpio_output2, ~/set_gpio_output3");
   }
+
+  // Start executor thread for service callbacks (NOT in RT thread)
+  executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  executor_->add_node(node_);
+  executor_running_.store(true);
+  executor_thread_ = std::thread([this]() {
+    while (executor_running_.load()) {
+      executor_->spin_some(std::chrono::milliseconds(10));
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+  });
 
   return CallbackReturn::SUCCESS;
 }
 
 void SystemInterface::initModelSpecificSettings() {
   switch (model_) {
+    case MODEL_DG1F_M:
+      num_fingers_ = 1;
+      num_joints_ = 3;
+      supports_ft_sensor_ = false;
+      supports_gpio_ = true;
+      min_firmware_major_ = 2;
+      min_firmware_minor_ = 8;
+      // DG1F-M (M series): motor direction is -1 before firmware v2.8
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = -1;
+      }
+      break;
+
+    case MODEL_DG2F_M:
+      num_fingers_ = 2;
+      num_joints_ = 6;
+      supports_ft_sensor_ = false;
+      supports_gpio_ = true;
+      min_firmware_major_ = 2;
+      min_firmware_minor_ = 8;
+      // DG2F-M (M series): motor direction is -1 before firmware v2.8
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = -1;
+      }
+      break;
+
     case MODEL_DG3F_B:
       num_fingers_ = 3;
       num_joints_ = 12;
@@ -294,6 +446,62 @@ void SystemInterface::initModelSpecificSettings() {
       }
       break;
 
+    case MODEL_DG5F_S_L:
+      num_fingers_ = 5;
+      num_joints_ = 20;
+      supports_ft_sensor_ = true;
+      supports_gpio_ = false;  // no GPIO hardware on the S variants
+      min_firmware_major_ = 0;
+      min_firmware_minor_ = 0;
+      hand_type_ = "left";
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = 1;
+      }
+      firmware_dir_revised_ = true;
+      break;
+
+    case MODEL_DG5F_S_R:
+      num_fingers_ = 5;
+      num_joints_ = 20;
+      supports_ft_sensor_ = true;
+      supports_gpio_ = false;  // no GPIO hardware on the S variants
+      min_firmware_major_ = 0;
+      min_firmware_minor_ = 0;
+      hand_type_ = "right";
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = 1;
+      }
+      firmware_dir_revised_ = true;
+      break;
+
+    case MODEL_DG5F_S15_L:
+      num_fingers_ = 5;
+      num_joints_ = 15;
+      supports_ft_sensor_ = true;
+      supports_gpio_ = false;  // no GPIO hardware on the S variants
+      min_firmware_major_ = 0;
+      min_firmware_minor_ = 0;
+      hand_type_ = "left";
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = 1;
+      }
+      firmware_dir_revised_ = true;
+      break;
+
+    case MODEL_DG5F_S15_R:
+      num_fingers_ = 5;
+      num_joints_ = 15;
+      supports_ft_sensor_ = true;
+      supports_gpio_ = false;  // no GPIO hardware on the S variants
+      min_firmware_major_ = 0;
+      min_firmware_minor_ = 0;
+      hand_type_ = "right";
+      for (size_t i = 0; i < motor_dir_.size(); ++i) {
+        motor_dir_[i] = 1;
+      }
+      firmware_dir_revised_ = true;
+      break;
+
     default:
       RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
                   "Unknown model 0x%X, using DG5F-L defaults", model_);
@@ -308,15 +516,17 @@ void SystemInterface::initModelSpecificSettings() {
 }
 
 bool SystemInterface::checkFirmwareCompatibility() {
-  // DG4F doesn't need firmware check for motor direction
-  if (model_ == MODEL_DG4F) {
+  // DG4F and DG5F-S models don't need firmware check for motor direction
+  if (model_ == MODEL_DG4F ||
+      model_ == MODEL_DG5F_S_L || model_ == MODEL_DG5F_S_R ||
+      model_ == MODEL_DG5F_S15_L || model_ == MODEL_DG5F_S15_R) {
     firmware_dir_revised_ = true;
     return true;
   }
 
   // Check if firmware version meets minimum requirement for motor direction revision
   if (firmware_version_[0] > min_firmware_major_ ||
-      (firmware_version_[0] == min_firmware_major_ && 
+      (firmware_version_[0] == min_firmware_major_ &&
        firmware_version_[1] >= min_firmware_minor_)) {
     firmware_dir_revised_ = true;
   } else {
@@ -333,12 +543,12 @@ int SystemInterface::getMotorDirection(size_t joint_index) const {
   if (joint_index >= motor_dir_.size()) {
     return 1;
   }
-  
+
   // If firmware is revised, motor direction is always 1
   if (firmware_dir_revised_) {
     return 1;
   }
-  
+
   // Otherwise use the model-specific motor direction
   return motor_dir_[joint_index];
 }
@@ -368,12 +578,38 @@ hardware_interface::SystemInterface::CallbackReturn
 SystemInterface::on_deactivate(
     [[maybe_unused]] const rclcpp_lifecycle::State& previous_state) {
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Deactivating driver...");
-  
+
+  // Latch before sending, so an update cycle still in flight cannot
+  // re-energize the motors afterwards.
+  torque_released_.store(true);
+
+  // Stop the reconnect thread first, or it can reconnect underneath us and
+  // leave the hand energized after deactivation.
+  stopReconnectThread();
+
+  // Stop executor thread
+  executor_running_.store(false);
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+  if (executor_) {
+    executor_->cancel();
+  }
+
   if (delto_client_) {
-    delto_client_->Disconnect();
+    // Release motor torque before disconnecting: the firmware keeps applying
+    // the last PWM duty it received, so the fingers would stay curled.
+    {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
+      sendZeroDutyLocked();
+      delto_client_->Disconnect();
+    }
   }
   is_connected_.store(false);
   connection_status_ = 0.0;
+  resetCurrentControlState();
+  // Drop the stale command so a later on_activate cannot replay it.
+  std::fill(effort_commands_.begin(), effort_commands_.end(), 0.0);
 
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Driver deactivated");
   return CallbackReturn::SUCCESS;
@@ -382,7 +618,7 @@ SystemInterface::on_deactivate(
 std::vector<hardware_interface::StateInterface>
 SystemInterface::export_state_interfaces() {
   std::vector<hardware_interface::StateInterface> state_interfaces;
-  
+
   // Reserve space for all interfaces
   size_t reserve_size = info_.joints.size() * 4;  // position, velocity, effort, temperature
   if (supports_ft_sensor_ && fingertip_sensor_enabled_) {
@@ -409,11 +645,12 @@ SystemInterface::export_state_interfaces() {
                  "export_state_interfaces: %s", info_.joints[i].name.c_str());
   }
 
-  // Fingertip F/T sensor interfaces
-  if (supports_ft_sensor_ && fingertip_sensor_enabled_) {
+  // Fingertip F/T sensor interfaces (only for actual F/T sensor, not tactile)
+  if (supports_ft_sensor_ && fingertip_sensor_enabled_ &&
+      isFTSensor(device_sensor_type_)) {
     for (size_t finger = 0; finger < num_fingers_; finger++) {
       std::string sensor_name = getFingerName(finger);
-      
+
       state_interfaces.emplace_back(hardware_interface::StateInterface(
           sensor_name, "force.x", &fingertip_force_x_[finger]));
       state_interfaces.emplace_back(hardware_interface::StateInterface(
@@ -442,7 +679,7 @@ SystemInterface::export_state_interfaces() {
         "gpio", "output_3", &gpio_states_[2]));
     state_interfaces.emplace_back(hardware_interface::StateInterface(
         "gpio", "input_1", &gpio_states_[3]));
-    
+
     RCLCPP_DEBUG(rclcpp::get_logger("SystemInterface"),
                  "export_state_interfaces: gpio (4 channels)");
   }
@@ -478,10 +715,15 @@ SystemInterface::CallbackReturn SystemInterface::on_activate(
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Activating driver...");
 
   if (is_connected_.load()) {
+    // Re-arm the duty path and start from a clean integrator.
+    resetCurrentControlState();
+    std::fill(effort_commands_.begin(), effort_commands_.end(), 0.0);
+    stale_read_cycles_ = 0;
+    torque_released_.store(false);
     RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Driver activated successfully!");
     return CallbackReturn::SUCCESS;
   } else {
-    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"), 
+    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"),
                  "Device not connected, cannot activate");
     return CallbackReturn::ERROR;
   }
@@ -491,13 +733,28 @@ hardware_interface::SystemInterface::CallbackReturn
 SystemInterface::on_shutdown(
     [[maybe_unused]] const rclcpp_lifecycle::State& previous_state) {
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Shutting down driver...");
-  
+
+  torque_released_.store(true);
+  stopReconnectThread();
+
+  executor_running_.store(false);
+  if (executor_thread_.joinable()) {
+    executor_thread_.join();
+  }
+  if (executor_) {
+    executor_->cancel();
+  }
+
   if (delto_client_) {
+    // See on_deactivate. Already-disconnected is a no-op in
+    // sendZeroDutyLocked.
+    std::lock_guard<std::mutex> lock(comm_mutex_);
+    sendZeroDutyLocked();
     delto_client_->Disconnect();
   }
   is_connected_.store(false);
   connection_status_ = 0.0;
-  
+
   RCLCPP_INFO(rclcpp::get_logger("SystemInterface"), "Driver stopped");
   return CallbackReturn::SUCCESS;
 }
@@ -513,38 +770,114 @@ SystemInterface::return_type SystemInterface::read(
       return return_type::ERROR;
     }
 
+    // If disconnected, return OK with stale data while background reconnects
     if (!is_connected_.load()) {
-      return return_type::ERROR;
+      // The controller keeps running against frozen feedback, so hold the
+      // integrator at zero rather than dumping the windup on reconnect.
+      resetCurrentControlState();
+
+      if (++stale_read_cycles_ == 1) {
+        RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                    "Link down: publishing stale joint states. The firmware "
+                    "holds the last PWM duty until the link is restored.");
+      }
+
+      if (!reconnecting_.load() && !torque_released_.load()) {
+        // Reap the previous thread; a detached one can outlive the component.
+        stopReconnectThread();
+        reconnecting_.store(true);
+        reconnect_running_.store(true);
+        reconnect_thread_ = std::thread([this]() {
+          constexpr int RETRY_DELAY_MS = 1000;
+          constexpr int MAX_RETRY_DELAY_MS = 8000;
+          int delay_ms = RETRY_DELAY_MS;
+          int attempt = 0;
+
+          // Retry until told to stop: giving up leaves the node alive but
+          // permanently blind, with the motors still energized.
+          while (reconnect_running_.load()) {
+            // Sleep in slices so shutdown does not have to wait out the delay.
+            for (int slept = 0;
+                 slept < delay_ms && reconnect_running_.load();
+                 slept += 100) {
+              std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            if (!reconnect_running_.load()) {
+              break;
+            }
+
+            ++attempt;
+            try {
+              RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
+                          "Reconnection attempt %d...", attempt);
+              std::lock_guard<std::mutex> lock(comm_mutex_);
+              delto_client_->Disconnect();
+              delto_client_->Connect();
+
+              // De-energize first: the firmware still holds the pre-drop duty,
+              // so resuming write() directly would jump from that to the new
+              // command.
+              sendZeroDutyLocked();
+              resetCurrentControlState();
+
+              is_connected_.store(true);
+              connection_status_ = 1.0;
+              reconnecting_.store(false);
+              RCLCPP_INFO(rclcpp::get_logger("SystemInterface"),
+                          "Reconnected successfully on attempt %d "
+                          "(motor duty zeroed, current integrator reset)",
+                          attempt);
+              return;
+            } catch (const std::exception& e) {
+              RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                          "Reconnection attempt %d failed: %s", attempt,
+                          e.what());
+            }
+            delay_ms = std::min(delay_ms * 2, MAX_RETRY_DELAY_MS);
+          }
+          reconnecting_.store(false);
+        });
+      }
+      return return_type::OK;  // Return stale data, don't block RT loop
     }
+
+    stale_read_cycles_ = 0;
 
     DeltoTCP::DeltoReceivedData received_data;
     try {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
       received_data = delto_client_->GetData();
     } catch (const std::exception& e) {
-      RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"), 
-                   "Failed to read data: %s", e.what());
+      RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                  "Read failed: %s. Starting background reconnection...", e.what());
       is_connected_.store(false);
       connection_status_ = 0.0;
-      return return_type::ERROR;
+      return return_type::OK;  // Return stale data, reconnect on next cycle
     }
 
-    // Validate and copy joint data
+    // Element-wise copies, never vector assignment: export_state_interfaces()
+    // handed out &positions_[i], so a reallocation would dangle those handles.
     if (received_data.joint.size() >= positions_.size()) {
-      positions_ = received_data.joint;
+      std::copy_n(received_data.joint.begin(), positions_.size(),
+                  positions_.begin());
     }
     if (received_data.velocity.size() >= velocities_.size()) {
-      velocities_ = received_data.velocity;
+      std::copy_n(received_data.velocity.begin(), velocities_.size(),
+                  velocities_.begin());
     }
     if (received_data.current.size() >= efforts_.size()) {
-      current_ = received_data.current;
-      efforts_ = current_;
+      std::copy_n(received_data.current.begin(), current_.size(),
+                  current_.begin());
+      std::copy_n(current_.begin(), efforts_.size(), efforts_.begin());
     }
     if (received_data.temperature.size() >= temperature_.size()) {
-      temperature_ = received_data.temperature;
+      std::copy_n(received_data.temperature.begin(), temperature_.size(),
+                  temperature_.begin());
     }
 
-    // Parse fingertip sensor data
-    if (supports_ft_sensor_ && fingertip_sensor_enabled_ && 
+    // Parse F/T sensor data (only when device has F/T sensor)
+    if (isFTSensor(device_sensor_type_) &&
+        fingertip_sensor_enabled_ &&
         received_data.fingertip_sensor.size() >= num_fingers_ * 6) {
       for (size_t finger = 0; finger < num_fingers_; finger++) {
         size_t base = finger * 6;
@@ -554,6 +887,46 @@ SystemInterface::return_type SystemInterface::read(
         fingertip_torque_x_[finger] = received_data.fingertip_sensor[base + 3];
         fingertip_torque_y_[finger] = received_data.fingertip_sensor[base + 4];
         fingertip_torque_z_[finger] = received_data.fingertip_sensor[base + 5];
+      }
+    }
+
+    // Publish tactile image data
+    if (device_sensor_type_ == DeltoTCP::SensorType::TACTILE_M &&
+        fingertip_sensor_enabled_ &&
+        received_data.tactile_m.size() == tactile_publishers_.size()) {
+      for (size_t i = 0; i < tactile_publishers_.size(); i++) {
+        sensor_msgs::msg::Image img;
+        img.header.stamp = time;
+        img.header.frame_id = hand_type_ + "_fingertip_" + std::to_string(i + 1);
+        img.height = 5;
+        img.width = 3;
+        img.encoding = "mono8";
+        img.is_bigendian = false;
+        img.step = 3;
+        img.data = received_data.tactile_m[i];  // 15 bytes
+        tactile_publishers_[i]->publish(img);
+      }
+    }
+
+    if (device_sensor_type_ == DeltoTCP::SensorType::TACTILE_S &&
+        fingertip_sensor_enabled_ &&
+        received_data.tactile_s.size() == tactile_publishers_.size()) {
+      for (size_t i = 0; i < tactile_publishers_.size(); i++) {
+        sensor_msgs::msg::Image img;
+        img.header.stamp = time;
+        img.header.frame_id = hand_type_ + "_fingertip_" + std::to_string(i + 1);
+        img.height = 6;
+        img.width = 3;
+        img.encoding = "mono16";
+        img.is_bigendian = false;
+        img.step = 6;  // 3 pixels * 2 bytes
+        img.data.resize(36);
+        for (size_t j = 0; j < 18; j++) {
+          // Little-endian for mono16
+          img.data[j * 2]     = received_data.tactile_s[i][j] & 0xFF;
+          img.data[j * 2 + 1] = (received_data.tactile_s[i][j] >> 8) & 0xFF;
+        }
+        tactile_publishers_[i]->publish(img);
       }
     }
 
@@ -568,18 +941,13 @@ SystemInterface::return_type SystemInterface::read(
     is_connected_.store(true);
     connection_status_ = 1.0;
 
-    // Spin once to process service callbacks
-    if (node_) {
-      rclcpp::spin_some(node_);
-    }
-
     return return_type::OK;
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"), 
+    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"),
                  "Unexpected error in read: %s", e.what());
     is_connected_.store(false);
     connection_status_ = 0.0;
-    return return_type::ERROR;
+    return return_type::OK;  // Don't deactivate, let reconnection handle it
   }
 }
 
@@ -587,45 +955,55 @@ SystemInterface::return_type SystemInterface::write(
     [[maybe_unused]] const rclcpp::Time& time,
     [[maybe_unused]] const rclcpp::Duration& period) {
   if (!is_connected_.load()) {
-    return return_type::ERROR;
+    return return_type::OK;  // Skip write while reconnecting
   }
 
-  std::vector<double> filter_effort_commands(effort_commands_.size());
-  std::vector<double> duty(effort_commands_.size());
-  std::vector<int> int_duty(effort_commands_.size());
-  std::vector<int> current_mA(effort_commands_.size());
+  // Deliberately de-energized by a deactivate/shutdown transition; without
+  // this an in-flight cycle would re-send the pre-release duty.
+  if (torque_released_.load()) {
+    return return_type::OK;
+  }
 
   for (size_t i = 0; i < effort_commands_.size(); ++i) {
-    current_mA[i] = static_cast<int>(current_[i]);
+    current_mA_[i] = static_cast<int>(current_[i]);
   }
 
   try {
-    filter_effort_commands = delto_gripper_helper::CurrentControl(
-        effort_commands_.size(), current_mA, effort_commands_,
-        current_limit_flag_, current_integral_);
-
-    duty = delto_gripper_helper::ConvertDuty(
-        effort_commands_.size(), filter_effort_commands);
-
-    for (size_t i = 0; i < effort_commands_.size(); ++i) {
-      int_duty[i] = static_cast<int>(duty[i] * 10);
-      int_duty[i] = std::clamp(int_duty[i], -1000, 1000);
-      
-      // Apply motor direction based on firmware version
-      int_duty[i] *= getMotorDirection(i);
+    if (model_ == MODEL_DG5F_S_L || model_ == MODEL_DG5F_S_R ||
+        model_ == MODEL_DG5F_S15_L || model_ == MODEL_DG5F_S15_R) {
+      filter_effort_commands_ = delto_gripper_helper::CurrentControlSModel(
+          effort_commands_.size(), current_mA_, effort_commands_,
+          current_limit_flag_, current_integral_);
+    } else {
+      filter_effort_commands_ = delto_gripper_helper::CurrentControl(
+          effort_commands_.size(), current_mA_, effort_commands_,
+          current_limit_flag_, current_integral_);
     }
 
-    delto_client_->SendDuty(int_duty);
-    
+    duty_ = delto_gripper_helper::ConvertDuty(
+        effort_commands_.size(), filter_effort_commands_);
+
+    for (size_t i = 0; i < effort_commands_.size(); ++i) {
+      int_duty_[i] = static_cast<int>(duty_[i] * 10);
+      int_duty_[i] = std::clamp(int_duty_[i], -1000, 1000);
+
+      // Apply motor direction based on firmware version
+      int_duty_[i] *= getMotorDirection(i);
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
+      delto_client_->SendDuty(int_duty_);
+    }
+
     is_connected_.store(true);
     connection_status_ = 1.0;
-
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(rclcpp::get_logger("SystemInterface"), 
-                 "Write error: %s", e.what());
+    RCLCPP_WARN(rclcpp::get_logger("SystemInterface"),
+                "Write error: %s", e.what());
     is_connected_.store(false);
     connection_status_ = 0.0;
-    return return_type::ERROR;
+    return return_type::OK;  // Don't deactivate hardware, let read() handle reconnection
   }
 
   return return_type::OK;
@@ -636,6 +1014,7 @@ void SystemInterface::ftOffsetCallback(
     std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
   try {
     if (delto_client_ && supports_ft_sensor_ && fingertip_sensor_enabled_) {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
       delto_client_->SetFTSensorOffset();
       response->success = true;
       response->message = "F/T sensor offset calibration completed successfully.";
@@ -664,6 +1043,7 @@ void SystemInterface::gpioOutput1Callback(
     std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
   try {
     if (delto_client_ && supports_gpio_ && io_enabled_) {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
       gpio_output1_state_ = request->data;
       delto_client_->SetGPIO(gpio_output1_state_, gpio_output2_state_, gpio_output3_state_);
       response->success = true;
@@ -686,6 +1066,7 @@ void SystemInterface::gpioOutput2Callback(
     std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
   try {
     if (delto_client_ && supports_gpio_ && io_enabled_) {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
       gpio_output2_state_ = request->data;
       delto_client_->SetGPIO(gpio_output1_state_, gpio_output2_state_, gpio_output3_state_);
       response->success = true;
@@ -708,6 +1089,7 @@ void SystemInterface::gpioOutput3Callback(
     std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
   try {
     if (delto_client_ && supports_gpio_ && io_enabled_) {
+      std::lock_guard<std::mutex> lock(comm_mutex_);
       gpio_output3_state_ = request->data;
       delto_client_->SetGPIO(gpio_output1_state_, gpio_output2_state_, gpio_output3_state_);
       response->success = true;

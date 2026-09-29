@@ -30,8 +30,11 @@
 #define DELTO_HARDWARE__SYSTEM_INTERFACE_HPP_
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #include <array>
 
@@ -43,6 +46,18 @@
 #include "rclcpp_lifecycle/state.hpp"
 #include "std_srvs/srv/trigger.hpp"
 #include "std_srvs/srv/set_bool.hpp"
+#include "sensor_msgs/msg/image.hpp"
+
+// ros2_control 4.x deprecated on_init(const HardwareInfo&) in favour of
+// on_init(const HardwareComponentInterfaceParams&). Humble only has the former.
+// Detect by header presence rather than a version number so this keeps working
+// on both without a -Wdeprecated-declarations warning on either.
+#if defined(__has_include)
+#  if __has_include("hardware_interface/types/hardware_component_interface_params.hpp")
+#    include "hardware_interface/types/hardware_component_interface_params.hpp"
+#    define DELTO_HW_COMPONENT_PARAMS_ON_INIT 1
+#  endif
+#endif
 
 #include "delto_tcp_comm/delto_developer_TCP.hpp"
 #include "delto_hardware/delto_gripper_helper.hpp"
@@ -50,11 +65,17 @@
 namespace delto_hardware {
 
 // Model IDs
-constexpr uint16_t MODEL_DG3F_B = 0x3F01;
-constexpr uint16_t MODEL_DG3F_M = 0x3F02;
-constexpr uint16_t MODEL_DG4F   = 0x4F02;
-constexpr uint16_t MODEL_DG5F_L = 0x5F12;
-constexpr uint16_t MODEL_DG5F_R = 0x5F22;
+constexpr uint16_t MODEL_DG1F_M    = 0x1F02;
+constexpr uint16_t MODEL_DG2F_M    = 0x2F02;
+constexpr uint16_t MODEL_DG3F_B    = 0x3F01;
+constexpr uint16_t MODEL_DG3F_M    = 0x3F02;
+constexpr uint16_t MODEL_DG4F      = 0x4F02;
+constexpr uint16_t MODEL_DG5F_L    = 0x5F12;
+constexpr uint16_t MODEL_DG5F_R    = 0x5F22;
+constexpr uint16_t MODEL_DG5F_S_L  = 0x5F14;
+constexpr uint16_t MODEL_DG5F_S_R  = 0x5F24;
+constexpr uint16_t MODEL_DG5F_S15_L = 0x5F34;
+constexpr uint16_t MODEL_DG5F_S15_R = 0x5F44;
 
 // Custom hardware interface type for temperature
 namespace delto_interface {
@@ -85,12 +106,26 @@ static const int DG5F_RIGHT_MOTOR_DIR[20] = {
     -1, -1, -1, -1
 };
 
+// Check if sensor type is any F/T variant
+inline bool isFTSensor(DeltoTCP::SensorType type) {
+  return type == DeltoTCP::SensorType::FT_6AXIS ||
+         type == DeltoTCP::SensorType::FT_3AXIS ||
+         type == DeltoTCP::SensorType::FT_4AXIS;
+}
+
 class SystemInterface : public hardware_interface::SystemInterface {
  public:
   using return_type = hardware_interface::return_type;
   using CallbackReturn = rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn;
 
+  ~SystemInterface() override;
+
+#ifdef DELTO_HW_COMPONENT_PARAMS_ON_INIT
+  CallbackReturn on_init(
+      const hardware_interface::HardwareComponentInterfaceParams& params) override;
+#else
   CallbackReturn on_init(const hardware_interface::HardwareInfo& info) override;
+#endif
   CallbackReturn on_activate(const rclcpp_lifecycle::State& previous_state) override;
   CallbackReturn on_deactivate(const rclcpp_lifecycle::State& previous_state) override;
   CallbackReturn on_shutdown(const rclcpp_lifecycle::State& previous_state) override;
@@ -107,11 +142,18 @@ class SystemInterface : public hardware_interface::SystemInterface {
 
  private:
   // Helper methods
+  // Shared body of both on_init overloads; reads the already-populated info_.
+  CallbackReturn initHardware();
   void initModelSpecificSettings();
   bool checkFirmwareCompatibility();
   int getMotorDirection(size_t joint_index) const;
   std::string getFingerName(size_t finger_index) const;
-  
+  // Must be called before the client or `this` is destroyed.
+  void stopReconnectThread();
+  // Caller must hold comm_mutex_.
+  bool sendZeroDutyLocked();
+  void resetCurrentControlState();
+
   // Service callbacks
   void ftOffsetCallback(
       const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
@@ -131,27 +173,27 @@ class SystemInterface : public hardware_interface::SystemInterface {
   int delto_port_;
   uint16_t model_;
   std::string hand_type_;  // "left" or "right" for DG5F
-  
+
   // Model capabilities (determined by model ID)
   bool supports_ft_sensor_;      // DG3F-M, DG4F, DG5F
   bool supports_gpio_;           // All models (DG3F-B, DG3F-M, DG4F, DG5F)
   bool supports_temperature_;    // Future use
   size_t num_fingers_;           // 3, 4, or 5
   size_t num_joints_;            // 12, 18, or 20
-  
+
   // User-enabled features (from parameters)
   bool fingertip_sensor_enabled_;
   bool io_enabled_;
-  
+
   // Firmware version
   std::vector<uint8_t> firmware_version_;
   bool firmware_dir_revised_;  // Motor direction revised in firmware
-  
+
   // Minimum firmware versions for motor direction revision
   // DG3F-B: v3.6+, DG3F-M: v2.8+, DG5F: v2.8+, DG4F: always revised
   int min_firmware_major_;
   int min_firmware_minor_;
-  
+
   // Motor direction array (for models that need it)
   std::vector<int> motor_dir_;
 
@@ -162,7 +204,7 @@ class SystemInterface : public hardware_interface::SystemInterface {
   std::vector<double> temperature_;
   std::vector<double> effort_commands_;
   std::vector<double> current_;
-  
+
   // Current control
   std::vector<int> current_limit_flag_;
   std::vector<double> current_integral_;
@@ -183,17 +225,41 @@ class SystemInterface : public hardware_interface::SystemInterface {
 
   // Connection status
   std::atomic<bool> is_connected_;
+  std::atomic<bool> reconnecting_;  // Background reconnection in progress
+  std::atomic<bool> reconnect_running_;  // Reconnect thread should keep going
+  std::thread reconnect_thread_;
+  // Hand deliberately de-energized; write() refuses to send duty while set.
+  std::atomic<bool> torque_released_;
+  uint64_t stale_read_cycles_;
+  // Exported as a raw double*, so it cannot be std::atomic.
   double connection_status_;
+
+  // Preallocated write() buffers, sized in on_init so update() never allocates.
+  std::vector<double> filter_effort_commands_;
+  std::vector<double> duty_;
+  std::vector<int> int_duty_;
+  std::vector<int> current_mA_;
 
   // Communication client
   std::unique_ptr<DeltoTCP::Communication> delto_client_;
+  std::mutex comm_mutex_;  // Protects delto_client_ access from multiple threads
 
-  // ROS2 node for services
+  // Sensor type detected from device
+  DeltoTCP::SensorType device_sensor_type_;
+
+  // ROS2 node for services and publishers
   rclcpp::Node::SharedPtr node_;
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+  std::thread executor_thread_;
+  std::atomic<bool> executor_running_;
+
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr ft_offset_service_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr gpio_output1_service_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr gpio_output2_service_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr gpio_output3_service_;
+
+  // Tactile image publishers (per finger)
+  std::vector<rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr> tactile_publishers_;
 };
 
 }  // namespace delto_hardware

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.12)
 project(delto_hardware)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -14,13 +14,24 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(std_srvs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(delto_tcp_comm REQUIRED)
-find_package(Boost REQUIRED COMPONENTS system)
+
+# Select architecture-specific library
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  set(DELTO_HELPER_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/aarch64)
+  set(DELTO_HELPER_LIB_NAME libdelto_gripper_helper_arm64.so)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(DELTO_HELPER_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/x86_64)
+  set(DELTO_HELPER_LIB_NAME libdelto_gripper_helper_amd64.so)
+else()
+  message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
 
 # Import delto_gripper_helper library (shared across all drivers)
 add_library(delto_gripper_helper SHARED IMPORTED)
 set_target_properties(delto_gripper_helper PROPERTIES
-  IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/lib/libdelto_gripper_helper.so
+  IMPORTED_LOCATION ${DELTO_HELPER_LIB_DIR}/${DELTO_HELPER_LIB_NAME}
 )
 
 # Build the hardware interface library
@@ -33,18 +44,33 @@ target_include_directories(${PROJECT_NAME} PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-ament_target_dependencies(${PROJECT_NAME}
-  hardware_interface
-  pluginlib
-  rclcpp
-  rclcpp_lifecycle
-  std_srvs
-  delto_tcp_comm
-)
+# ament_target_dependencies() was removed in the ament_cmake shipped with
+# ROS 2 Lyrical. Detect the command rather than the distro so one CMakeLists
+# covers Humble, Jazzy and Lyrical.
+if(COMMAND ament_target_dependencies)
+  ament_target_dependencies(${PROJECT_NAME}
+    hardware_interface
+    pluginlib
+    rclcpp
+    rclcpp_lifecycle
+    std_srvs
+    sensor_msgs
+    delto_tcp_comm
+  )
+else()
+  target_link_libraries(${PROJECT_NAME}
+    hardware_interface::hardware_interface
+    pluginlib::pluginlib
+    rclcpp::rclcpp
+    rclcpp_lifecycle::rclcpp_lifecycle
+    ${std_srvs_TARGETS}
+    ${sensor_msgs_TARGETS}
+    delto_tcp_comm::delto_tcp_comm
+  )
+endif()
 
 target_link_libraries(${PROJECT_NAME}
   delto_gripper_helper
-  Boost::system
 )
 
 # Export hardware plugins
@@ -78,6 +104,7 @@ ament_export_dependencies(
   rclcpp
   rclcpp_lifecycle
   std_srvs
+  sensor_msgs
   delto_tcp_comm
 )
 

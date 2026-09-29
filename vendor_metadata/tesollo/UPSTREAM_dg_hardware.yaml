@@ -1,0 +1,21 @@
+name: dg_hardware
+repository: https://github.com/tesollodelto/dg_hardware.git
+branch: main
+commit: c068fe70ea38cd88aaad4e194f344403c20a1d7e
+imported_at: 2026-09-14
+license: BSD-3-Clause
+destination: ros_ws/src/dg_hardware
+packages:
+  - delto_hardware
+# Replaces the delto_hardware of the delto_m_ros2 snapshot (UPSTREAM.yaml, 2026-06-11).
+# Why: the snapshot exported no tactile data at all (the hands mounted since
+# 2026-09-14 carry TACTILE_M fingertips, firmware 3.0), created the F/T offset
+# service on a node nothing spun, and kept holding motor torque on
+# deactivate/shutdown and through a link loss. Upstream publishes tactile/finger_N
+# images, spins its service node on an executor thread, and releases torque.
+replaces:
+  - ros_ws/src/delto_m_ros2/delto_hardware
+excluded:
+  - .git/**
+  - .github/**
+local_modifications: []

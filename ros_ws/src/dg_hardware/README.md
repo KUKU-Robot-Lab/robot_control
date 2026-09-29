@@ -1,4 +1,9 @@
-# delto_hardware ROS 2 Package 🚀
+# delto_hardware ROS 2 Package
+
+[![CI](https://github.com/tesollodelto/dg_hardware/actions/workflows/ci.yml/badge.svg)](https://github.com/tesollodelto/dg_hardware/actions/workflows/ci.yml)
+![ROS 2 Humble](https://img.shields.io/badge/ROS_2-Humble-blue?logo=ros)
+![ROS 2 Jazzy](https://img.shields.io/badge/ROS_2-Jazzy-blue?logo=ros)
+![ROS 2 Lyrical](https://img.shields.io/badge/ROS_2-Lyrical-orange?logo=ros)
 
 ## 📌 Overview
 
@@ -13,12 +18,16 @@ The `delto_hardware` package provides a **unified ROS2 Hardware Interface** for 
 | DG4F | 0x4F02 | 4-Finger Gripper | 18 |
 | DG5F-L | 0x5F12 | 5-Finger Left Hand | 20 |
 | DG5F-R | 0x5F22 | 5-Finger Right Hand | 20 |
+| DG-5F-S-L | 0x5F14 | 5-Finger Small Left Hand | 20 |
+| DG-5F-S-R | 0x5F24 | 5-Finger Small Right Hand | 20 |
+| DG-5F-S15-L | 0x5F34 | 5-Finger Small 15-DOF Left Hand | 15 |
+| DG-5F-S15-R | 0x5F44 | 5-Finger Small 15-DOF Right Hand | 15 |
 
 ## 📦 Features
 
 - **Automatic Model Detection**: Identifies gripper model via firmware communication
-- **Position/Effort Control**: Supports both position and effort command interfaces
-- **Force/Torque Sensors**: Broadcasts fingertip F/T sensor data (DG5F models)
+- **Effort Control**: Supports effort command interface
+- **Force/Torque Sensors**: Broadcasts fingertip F/T sensor data (DG3F-M, DG4F, DG5F, DG5F-S models)
 - **GPIO Support**: Motor on/off and grasp/release commands
 - **Firmware Compatibility**: Handles motor direction based on firmware version
 
@@ -32,14 +41,13 @@ The `delto_hardware/SystemInterface` plugin provides:
 - `effort`: Joint effort/torque feedback
 
 ### Command Interfaces
-- `position`: Position command
 - `effort`: Effort/torque command
 
-### Sensors 
+### Sensors
 - Force/Torque sensors for each fingertip (DG3F-M, DG4F, DG5F models)
 
 ### GPIO
-- Output: 3 channels 
+- Output: 3 channels
 - Input: 1 channel
 
 ## 🔌 Services
@@ -66,11 +74,16 @@ ros2 service call /dg5f_right/delto_hardware_interface_node/set_ft_sensor_offset
 **Example:**
 ```bash
 # Motor ON
-ros2 service call /dg5f_left/set_gpio_output1 std_srvs/srv/SetBool "{data: true}"
+ros2 service call /dg5f_left/delto_hardware_interface_node/set_gpio_output1 std_srvs/srv/SetBool "{data: true}"
 
 # Grasp
-ros2 service call /dg5f_left/set_gpio_output2 std_srvs/srv/SetBool "{data: true}"
+ros2 service call /dg5f_left/delto_hardware_interface_node/set_gpio_output2 std_srvs/srv/SetBool "{data: true}"
 ```
+
+> **Tip:** Service names depend on the driver namespace. To find exact names at runtime:
+> ```bash
+> ros2 service list | grep <namespace>  # e.g., ros2 service list | grep dg5f_right
+> ```
 
 ## 📦 Installation
 
@@ -85,6 +98,10 @@ colcon build --packages-select delto_hardware
 - hardware_interface
 - pluginlib
 - rclcpp
+- rclcpp_lifecycle
+- std_srvs
+- sensor_msgs
+- delto_tcp_comm
 
 ## 🔌 Usage in URDF/XACRO
 
@@ -124,6 +141,10 @@ All driver packages using this hardware interface support namespaces:
 | dg4f_driver | `/dg4f/` |
 | dg5f_driver (right) | `/dg5f_right/` |
 | dg5f_driver (left) | `/dg5f_left/` |
+| dg5f_s_driver (right) | `/dg5f_s_right/` |
+| dg5f_s_driver (left) | `/dg5f_s_left/` |
+| dg5f_s_driver (15-DOF right) | `/dg5f_s_15dof_right/` |
+| dg5f_s_driver (15-DOF left) | `/dg5f_s_15dof_left/` |
 
 ## 🤝 Contributing
 Contributions are encouraged:
