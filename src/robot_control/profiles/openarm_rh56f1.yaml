@@ -1,0 +1,111 @@
+name: openarm_rh56f1
+components: [openarm, rh56f1]
+asset:
+  # The second robot (arm4090 PC): the same OpenArm pair with an Inspire
+  # RH56F1 on each arm, six actuators per hand. The asset is hdgp's
+  # openarm_rh56f1_bi_rl, whose control_joint_order is exactly the 26 joints
+  # below; the hands' mimic joints (*_2 of the fingers, thumb_3/4) are not
+  # actuated and not in the profile.
+  id: openarm_rh56f1_bi_rl
+  manifest: ../../../../hdgp/assets/robot/openarm_rh56f1_bi_rl/openarm_rh56f1_bi_rl_manifest.yaml
+  manifest_sha256: d13aaed8fc5efa486d1c2df65fa4329b0461f98361b5a97626fba9a9a06893e4
+  urdf: ../../../../hdgp/assets/robot/openarm_rh56f1_bi_rl/openarm_rh56f1_bi_rl.urdf
+ros:
+  humble:
+    command_topic: /robot_control/openarm_rh56f1/command
+    state_topic: /robot_control/openarm_rh56f1/state
+    controller: openarm_rh56f1_canonical_controller
+    command_rate_hz: 100
+  jazzy:
+    command_topic: /robot_control/openarm_rh56f1/command
+    state_topic: /robot_control/openarm_rh56f1/state
+    controller: openarm_rh56f1_canonical_controller
+    command_rate_hz: 100
+# The arm groups are those of openarm_tesollo: same arms, same bringup, same
+# controllers. Only asset_tip_link differs, because this asset ends the arm at
+# the RH56F1 base (r_hj_mount: r_al_7 -> r_hl_base) and has no palm_ee frame.
+groups:
+  openarm_right_arm:
+    joints: [r_aj_1, r_aj_2, r_aj_3, r_aj_4, r_aj_5, r_aj_6, r_aj_7]
+    hdgp_group: openarm_right_arm
+    controller: right_joint_trajectory_controller
+    moveit_group: right_arm
+    tip_link: openarm_right_hand_tcp
+    asset_tip_link: r_hl_base
+    effort_controller: right_forward_effort_controller
+  openarm_left_arm:
+    joints: [l_aj_1, l_aj_2, l_aj_3, l_aj_4, l_aj_5, l_aj_6, l_aj_7]
+    hdgp_group: openarm_left_arm
+    controller: left_joint_trajectory_controller
+    moveit_group: left_arm
+    tip_link: openarm_left_hand_tcp
+    asset_tip_link: l_hl_base
+    effort_controller: left_forward_effort_controller
+  # Each hand runs its own vendor driver process on its own port
+  # (ros_ws/src/inspire_rh56f1: `ros2 launch rh56f1_driver
+  # rh56f1_{right,left}_driver.launch.py transport:=rs485|canfd port:=...`).
+  # It has no controller_manager and no FollowJointTrajectory action, so these
+  # groups name no controller and are not executable from robotctl.
+  #
+  # state_topic is where the driver publishes the six actuators, but as
+  # rh56f1_interfaces/msg/GetAngleAct1 in vendor units (0.1 deg joint angle,
+  # large = open), not sensor_msgs/JointState in rad: the source names below
+  # are the joint_names the driver fills in, not rad values. A reader has to
+  # convert before these limits apply. Commands go to
+  # /hand_{side}/angle_set (rh56f1_interfaces/msg/SetAngle1, same units, -1 =
+  # leave that actuator alone). Driver slot order 0..5 is pinky, ring, middle,
+  # index, thumb bend (*_hj_thumb_2), thumb rotation (*_hj_thumb_1).
+  rh56f1_right_hand:
+    joints: [r_hj_thumb_1, r_hj_thumb_2, r_hj_index_1, r_hj_middle_1, r_hj_ring_1, r_hj_pinky_1]
+    state_topic: /hand_right/angle_actual
+  rh56f1_left_hand:
+    joints: [l_hj_thumb_1, l_hj_thumb_2, l_hj_index_1, l_hj_middle_1, l_hj_ring_1, l_hj_pinky_1]
+    state_topic: /hand_left/angle_actual
+# Driver endpoints per hand, for readers of this file. The profile loader does
+# not parse this block.
+hand_driver:
+  package: rh56f1_driver
+  message_package: rh56f1_interfaces
+  right:
+    launch: rh56f1_right_driver.launch.py
+    command_topic: /hand_right/angle_set
+    state_topic: /hand_right/angle_actual
+  left:
+    launch: rh56f1_left_driver.launch.py
+    command_topic: /hand_left/angle_set
+    state_topic: /hand_left/angle_actual
+  slot_order: [pinky_1, ring_1, middle_1, index_1, thumb_2, thumb_1]
+  unit: 0.1 deg (vendor angle register)
+joints:
+  - {canonical: r_aj_1, source: openarm_right_joint1, sign: 1, unit: rad, lower: -1.39626, upper: 3.49066, velocity: 2.0, effort: 40}
+  - {canonical: r_aj_2, source: openarm_right_joint2, sign: 1, unit: rad, lower: -0.174533, upper: 3.31612, velocity: 2.0, effort: 40}
+  - {canonical: r_aj_3, source: openarm_right_joint3, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 27}
+  - {canonical: r_aj_4, source: openarm_right_joint4, sign: 1, unit: rad, lower: 0, upper: 2.44346, velocity: 2.0, effort: 27}
+  - {canonical: r_aj_5, source: openarm_right_joint5, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
+  - {canonical: r_aj_6, source: openarm_right_joint6, sign: 1, unit: rad, lower: -0.785398, upper: 0.785398, velocity: 2.0, effort: 7}
+  - {canonical: r_aj_7, source: openarm_right_joint7, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
+  - {canonical: l_aj_1, source: openarm_left_joint1, sign: 1, unit: rad, lower: -3.49066, upper: 1.39626, velocity: 2.0, effort: 40}
+  - {canonical: l_aj_2, source: openarm_left_joint2, sign: 1, unit: rad, lower: -3.31612, upper: 0.174533, velocity: 2.0, effort: 40}
+  - {canonical: l_aj_3, source: openarm_left_joint3, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 27}
+  - {canonical: l_aj_4, source: openarm_left_joint4, sign: 1, unit: rad, lower: 0, upper: 2.44346, velocity: 2.0, effort: 27}
+  - {canonical: l_aj_5, source: openarm_left_joint5, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
+  - {canonical: l_aj_6, source: openarm_left_joint6, sign: 1, unit: rad, lower: -0.785398, upper: 0.785398, velocity: 2.0, effort: 7}
+  - {canonical: l_aj_7, source: openarm_left_joint7, sign: 1, unit: rad, lower: -1.5708, upper: 1.5708, velocity: 2.0, effort: 7}
+  # The hands, from the asset URDF the hdgp RH56F1 tasks train on
+  # (openarm_rh56f1_bi_rl.urdf), upper limits rounded to five digits
+  # (thumb_1 2.0943951, thumb_2 0.4745550, fingers 1.5285594; at most 5e-6 rad
+  # over). Every actuated joint starts at 0 (open) and both sides are equal.
+  # Effort 1 and velocity 2 are the asset URDF's. These are rad limits for
+  # the canonical interface; the driver itself speaks 0.1 deg (see groups).
+  - {canonical: r_hj_thumb_1, source: r_hj_thumb_1, sign: 1, unit: rad, lower: 0.0, upper: 2.0944, velocity: 2.0, effort: 1.0}
+  - {canonical: r_hj_thumb_2, source: r_hj_thumb_2, sign: 1, unit: rad, lower: 0.0, upper: 0.47456, velocity: 2.0, effort: 1.0}
+  - {canonical: r_hj_index_1, source: r_hj_index_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: r_hj_middle_1, source: r_hj_middle_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: r_hj_ring_1, source: r_hj_ring_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: r_hj_pinky_1, source: r_hj_pinky_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_thumb_1, source: l_hj_thumb_1, sign: 1, unit: rad, lower: 0.0, upper: 2.0944, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_thumb_2, source: l_hj_thumb_2, sign: 1, unit: rad, lower: 0.0, upper: 0.47456, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_index_1, source: l_hj_index_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_middle_1, source: l_hj_middle_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_ring_1, source: l_hj_ring_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}
+  - {canonical: l_hj_pinky_1, source: l_hj_pinky_1, sign: 1, unit: rad, lower: 0.0, upper: 1.52856, velocity: 2.0, effort: 1.0}

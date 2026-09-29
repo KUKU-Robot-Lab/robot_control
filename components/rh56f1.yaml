@@ -1,5 +1,18 @@
 name: rh56f1
-status: static_contract_only
+# Inspire RH56F1, six linear actuators per hand, one hand per port.
+# Driver: ros_ws/src/inspire_rh56f1 (vendor inspire_control_ros2, copied
+# unchanged from sim2real; launch per hand with rh56f1_driver
+# rh56f1_{right,left}_driver.launch.py transport:=rs485|canfd). Profile:
+# src/robot_control/profiles/openarm_rh56f1.yaml. Built, not yet run against
+# the hands on arm4090 (ports, Hand_ID, baud, CANFD converter unverified).
+status: driver_integrated_hardware_unverified
+# The canonical contract (rad) the profile declares. The driver below it
+# speaks vendor units: angle 0.1 deg (fingers 900..1740, large = open), force
+# in g at the sensor, speed 0..4000 dimensionless, -1 = leave the actuator.
 command: {interface: position, unit: rad}
 state: {position: rad, velocity: rad/s, effort: N*m}
+driver:
+  command: {topic: /hand_<side>/angle_set, type: rh56f1_interfaces/msg/SetAngle1, unit: 0.1deg}
+  state: {topic: /hand_<side>/angle_actual, type: rh56f1_interfaces/msg/GetAngleAct1, unit: 0.1deg}
+  transports: [rs485, canfd]
 safety: {watchdog_sec: 0.25, error_action: hold_last_safe_pose, estop: required}

@@ -1,0 +1,30 @@
+name: inspire_ws
+# The vendor's ROS2 driver as kept in sim2real, which received it from Inspire
+# (no public upstream repository). robot_control copies it unchanged.
+repository: https://github.com/KUKU-Robot-Lab/sim2real.git
+branch: main
+commit: 3465c5b69361b255bad3f94051522f2b4e1a301f
+# Last sim2real commit that touched the source path.
+source_last_changed: 0d231c13daf5f786205b94035112ba87b3e72212
+source_subpath: robot/vendor/inspire_ws/src
+imported_at: 2026-09-29
+license: MIT
+destination: ros_ws/src/inspire_rh56f1/vendor
+packages:
+  - inspire_control_ros2
+  - rh56f1_interfaces
+  - rh5dg2_interfaces
+# rh5dg2_interfaces stays because inspire_control_ros2 find_package()s it.
+# The robot_control side of the integration (per-hand launch and config
+# generation) is the separate package ros_ws/src/inspire_rh56f1/rh56f1_driver.
+excluded:
+  # A plain CMake project (non-ROS example); colcon would pick it up as a package.
+  - CMakeLists.txt
+  - serial_hand_control_node
+  - examples/**
+  - config/**
+  - document/*.docx
+  - document/*.pdf
+  - document/RH5DG2_485协议格式说明.md
+  - "**/__pycache__/**"
+local_modifications: []
