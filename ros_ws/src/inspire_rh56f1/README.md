@@ -2,6 +2,12 @@
 
 Inspire RH56F1 손(손당 액추에이터 6개)의 ROS 2 Humble 드라이버. 손 하나가 자기 포트 하나를 쓰고, 손마다 벤더 드라이버 프로세스를 하나씩 띄운다.
 
+> **2026-10-02 실기 손은 EtherCAT 으로 바꿨다(사용자 결정, RS485 는 더 쓰지 않는다).** 이 패키지의 벤더 RS485/CANFD 드라이버
+> 대신 sim2real 의 `deploy/policy_control/policy_control/rh56f1_ecat_node.py`(ROS) + `tools/ethercat/rh56f1_ecat_master`
+> (SOEM, 1 kHz) 가 같은 토픽 · 메시지(`/hand_<side>/angle_set` · `angle_actual` · `force_actual` · `current_actual` · `touch_data`)를 낸다.
+> 이 패키지에서는 **`rh56f1_interfaces` 메시지만** 계속 쓴다(빌드는 그대로 필요). 손 하나에 NIC 하나 — 일반 스위치로 묶지 않는다.
+> 자세한 것은 sim2real `docs/RH56F1_HAND.md` §7. 다시 RS485 로 돌아가려면 sim2real `config/rh56f1_ports.yaml` 의 transport 만 바꾼다.
+
 ## 출처
 
 | 항목 | 값 |
