@@ -263,7 +263,8 @@ def generate_launch_description():
             executable="spawner",
             namespace=namespace_from_context(context, arm_prefix),
             arguments=[
-                "joint_state_broadcaster",
+                # ★2026-10-03 KUKU: pd_state(250 Hz) · pd_temp(10 Hz) — 파이썬 pd · 정책용 낮은 주기 사본(controllers yaml)
+                "joint_state_broadcaster", "pd_state_broadcaster", "pd_temp_broadcaster",
                 "--controller-manager",
                 f"/{namespace_from_context(context, arm_prefix)}/controller_manager"
                 if namespace_from_context(context, arm_prefix)

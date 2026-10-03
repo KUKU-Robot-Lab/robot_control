@@ -20,6 +20,14 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
+    # ★2026-10-03 KUKU: pd · 정책(파이썬) 전용 낮은 주기 사본 — /joint_states(750 Hz)는 기록용으로 그대로 둔다.
+    #   파이썬 노드가 750 Hz 메시지를 하나하나 받으면 rclpy 콜백 비용만으로 프로세스당 약 0.5~1 코어를 쓴다(arm4090 실측).
+    pd_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    pd_temp_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
     left_forward_position_controller:
       type: forward_command_controller/ForwardCommandController
 
@@ -244,3 +252,24 @@ right_gripper_controller:
     constraints:
       stopped_velocity_tolerance: 0.0
       goal_time: 0.0
+
+# ★2026-10-03 KUKU: pd · 정책용 상태(250 Hz = 750/3)와 모터 온도(10 Hz) — 토픽은 컨트롤러 이름 아래(use_local_topics)
+#   /pd_state_broadcaster/joint_states · /pd_temp_broadcaster/dynamic_joint_states
+#   JSB 는 joints · interfaces 둘 다 있어야 거른다(하나라도 비면 전부 낸다).
+pd_state_broadcaster:
+  ros__parameters:
+    update_rate: 250
+    use_local_topics: true
+    interfaces: [position, velocity, effort]
+    joints: [openarm_left_joint1, openarm_left_joint2, openarm_left_joint3, openarm_left_joint4, openarm_left_joint5,
+             openarm_left_joint6, openarm_left_joint7, openarm_right_joint1, openarm_right_joint2, openarm_right_joint3,
+             openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7]
+
+pd_temp_broadcaster:
+  ros__parameters:
+    update_rate: 10
+    use_local_topics: true
+    interfaces: [temperature_rotor, temperature_mos]
+    joints: [openarm_left_joint1, openarm_left_joint2, openarm_left_joint3, openarm_left_joint4, openarm_left_joint5,
+             openarm_left_joint6, openarm_left_joint7, openarm_right_joint1, openarm_right_joint2, openarm_right_joint3,
+             openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7]
