@@ -55,7 +55,8 @@ measured:
 #         (in contact, unchanged while |f - k y| < hold_band_g)
 #   cmd = target + y;  once f > rate_on_g the command restarts from the measured angle and closes at most
 #         rate_reg_s (1 - f / f_max_g) per second (opening at once) until the force and the offset are gone;
-#         above current_hold_ma it stops at the measured angle until the operator opens past it
+#         above current_hold_ma it stops at the measured angle until the operator opens past it or the force falls
+#         hold_band_g below the force it was pinned at
 # Free space: follows the target. Contact: grip ~ k x registers the target is past the contact.
 control:
   admittance:

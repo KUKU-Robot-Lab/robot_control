@@ -127,3 +127,13 @@ def test_current_wind_up_pins_the_command_at_the_finger():
         cmd = adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 600.0, 300, 0.0)   # current gone: stays pinned
     assert cmd == pytest.approx(1300.0)
     assert adm_step(p, s, 3, 0.002, 1500.0, 1300.0, 600.0, 300, 0.0) > 1500.0 and not s.pinned[3]  # operator opens
+
+
+def test_pin_released_when_the_held_grip_fades():
+    """10.06: a 4 rad/s impact current pinned the finger, it relaxed, the grip stayed at ~80 g."""
+    p, s = load_admittance(), AdmState()
+    adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 500.0, 300, 0.0)
+    adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 500.0, 300, p.current_hold_ma + 50)
+    assert s.pinned[3]
+    adm_step(p, s, 3, 0.002, 1100.0, 1310.0, 500.0 - p.hold_band_g - 50, 300, 0.0)
+    assert not s.pinned[3]

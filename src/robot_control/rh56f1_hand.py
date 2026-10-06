@@ -75,6 +75,7 @@ class AdmState:
     lim: list[float] = field(default_factory=lambda: [0.0] * N)   # 접촉 중 지난 주기의 cmd
     limiting: list[int] = field(default_factory=lambda: [0] * N)
     pinned: list[int] = field(default_factory=lambda: [0] * N)   # 전류가 넘어 실제 각도에 고정됨
+    pin_f: list[float] = field(default_factory=lambda: [0.0] * N)   # 고정할 때의 힘
 
 
 def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual: float, force: float,
@@ -108,8 +109,12 @@ def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual
         s.limiting[i], s.lim[i] = 1, actual
     if s.limiting[i]:
         if current > p.current_hold_ma:
+            if not s.pinned[i]:
+                s.pin_f[i] = f
             s.pinned[i], s.lim[i] = 1, max(s.lim[i], actual)
-        if s.pinned[i] and cmd > s.lim[i]:
+        # released when the operator opens past it, or when the grip it held fades by the hold band (10.06: an
+        # impact current pinned a 4 rad/s approach, the finger relaxed and the grip stayed at ~80 g)
+        if s.pinned[i] and (cmd > s.lim[i] or f < s.pin_f[i] - p.hold_band_g):
             s.pinned[i] = 0
         rate = 0.0 if s.pinned[i] else p.rate_reg_s * max(1.0 - f / p.f_max_g, 0.0)
         s.lim[i] = cmd = max(cmd, s.lim[i] - rate * dt)
