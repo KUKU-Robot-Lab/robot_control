@@ -15,7 +15,7 @@ def test_contract_has_both_inputs_and_the_admittance():
     assert cmd["admittance"]["topic"] == "/hand_<side>/angle_target"
     p = load_admittance()
     assert p.joints == (1, 1, 1, 1, 1, 0)  # thumb_1 position only
-    assert p.argv().count(",") == 15
+    assert p.argv().count(",") == 16
     assert load_protection()["current_limit_ma"] == 800 and load_protection()["finger_mode"] == 0
 
 
@@ -36,11 +36,11 @@ def test_rigid_contact_settles_within_a_register():
         actual += max(min(cmd - actual, 2.0), -2.0)
         forces.append(force)
     tail = forces[-500:]
-    assert max(tail) - min(tail) <= 100.0 and 250 < tail[-1] < 400
+    assert max(tail) - min(tail) <= 100.0 and 250 < tail[-1] < 500  # k x penetration, + up to the hold band
 
 
 def test_link_1_contact_counts_more_and_soft_cap():
-    p = AdmParams()
+    p = AdmParams(hold_band_g=0.0)
     a, b = AdmState(), AdmState()
     for _ in range(5000):
         adm_step(p, a, 3, 0.002, 1300.0, 1300.0, 440.0, 300)
@@ -57,3 +57,15 @@ def test_bad_parameters_are_refused():
         AdmParams(k_g_per_reg=0)
     with pytest.raises(ValueError):
         AdmParams.from_cfg({"k": 1})
+
+
+def test_hold_band_keeps_the_offset_between_hand_steps():
+    """10.06 right index + cup at 500 Hz: the hand steps 3-5 registers, the force hunted 80 <-> 300 g."""
+    p, s = load_admittance(), AdmState()
+    s.y[3] = 60.0                      # k y = 216 g
+    for f in (130.0, 290.0, 180.0):    # readings within the band of 216 + 40 deadband
+        adm_step(p, s, 3, 0.002, 1300.0, 1360.0, f + 40.0, 300)
+        assert s.y[3] == pytest.approx(60.0)
+    adm_step(p, s, 3, 0.002, 1300.0, 1360.0, 500.0, 300)  # far outside: moves
+    assert s.y[3] > 60.0
+

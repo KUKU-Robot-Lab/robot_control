@@ -34,18 +34,20 @@ class AdmParams:
     max_offset_reg: float = 880.0
     proximal_scale: float = 0.7
     tip_on_counts: float = 20.0
+    hold_band_g: float = 100.0
     joints: tuple[int, ...] = (1, 1, 1, 1, 1, 0)
 
     def __post_init__(self) -> None:
         if min(self.k_g_per_reg, self.k_over_g_per_reg, self.f_max_g, self.max_offset_reg) <= 0:
             raise ValueError("admittance: k, k_over, f_max, max_offset > 0")
-        if min(self.deadband_g, self.tau_contact_s, self.tau_release_s, self.lead_reg, self.tip_on_counts) < 0:
+        if min(self.deadband_g, self.tau_contact_s, self.tau_release_s, self.lead_reg, self.tip_on_counts,
+               self.hold_band_g) < 0:
             raise ValueError("admittance: deadband, tau, lead, tip_on >= 0")
         if not 0 < self.proximal_scale <= 1 or len(self.joints) != N or any(j not in (0, 1) for j in self.joints):
             raise ValueError("admittance: proximal_scale in (0, 1], joints = 6 x 0/1")
 
     def argv(self) -> str:
-        """마스터 --adm 값: 숫자 10 개 + joints 6 개, 쉼표."""
+        """마스터 --adm 값: 숫자 11 개 + joints 6 개, 쉼표."""
         vals = [getattr(self, f.name) for f in fields(self) if f.name != "joints"]
         return ",".join(f"{v:g}" for v in vals) + "," + ",".join(str(j) for j in self.joints)
 
@@ -79,6 +81,8 @@ def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual
         f /= p.proximal_scale
     goal = f / p.k_g_per_reg + ((f - p.f_max_g) / p.k_over_g_per_reg if f > p.f_max_g else 0.0)
     goal = min(goal, p.max_offset_reg)
+    if f > 0 and abs(f - p.k_g_per_reg * s.y[i]) < p.hold_band_g and f <= p.f_max_g:
+        goal = s.y[i]   # inside the hold band: keep (the hand moves 3-5 registers at a time, 10.06)
     tau = p.tau_contact_s if f > 0 else p.tau_release_s
     a = 1.0 if tau <= 0 else dt / (tau + dt)
     s.y[i] += a * (goal - s.y[i])

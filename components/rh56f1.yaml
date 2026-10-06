@@ -52,6 +52,7 @@ measured:
 # the same numbers (sim2real test). Per axis and cycle, in registers (closing = smaller):
 #   f   = max(force - rest - deadband_g, 0)   (/ proximal_scale while the fingertip reads < tip_on_counts)
 #   y  += a (f / k_g_per_reg + max(f - f_max_g, 0) / k_over_g_per_reg - y),  a = dt / (tau + dt)
+#         (in contact, unchanged while |f - k y| < hold_band_g)
 #   cmd = target + y;  in contact cmd >= actual - lead_reg (1 - f / f_max_g)
 # Free space: follows the target. Contact: grip ~ k x registers the target is past the contact.
 control:
@@ -66,4 +67,6 @@ control:
     max_offset_reg: 880.0
     proximal_scale: 0.7
     tip_on_counts: 20.0          # 0.2 N
+    hold_band_g: 100.0           # in contact, |f - k y| below this keeps y: 10.06 right index + cup at 500 Hz, the
+                                 # hand stepped 3-5 registers at a time and the force hunted 80 <-> 300 g without it
     joints: [1, 1, 1, 1, 1, 0]   # slot order; thumb_1 position only (force sign)
