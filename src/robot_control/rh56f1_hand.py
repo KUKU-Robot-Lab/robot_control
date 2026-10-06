@@ -9,7 +9,8 @@ the same controller in training and on the hand.
 레지스터는 닫을수록 작아진다. 축마다 매 주기:
     f   = max(force - bias - deadband, 0)   (손끝 촉각이 조용하면 / proximal_scale)
     y  += a (f / k + max(f - f_max, 0) / k_over - y),   a = dt / (tau + dt)
-    cmd = target + y;  접촉 중 cmd >= actual - lead (1 - f / f_max)
+    cmd = target + y;  f > rate_on 이 되면 cmd 는 그때의 실제 각도에서 다시 출발해 초당 rate (1 - f / f_max) 칸까지만
+          닫힌다(여는 쪽은 바로) — 힘과 y 가 다 빠질 때까지
 """
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ class AdmParams:
     tau_release_s: float = 0.15
     f_max_g: float = 800.0
     k_over_g_per_reg: float = 0.36
-    lead_reg: float = 11.0
+    rate_on_g: float = 60.0
+    rate_reg_s: float = 165.0
     max_offset_reg: float = 880.0
     proximal_scale: float = 1.0
     tip_on_counts: float = 20.0
@@ -40,14 +42,14 @@ class AdmParams:
     def __post_init__(self) -> None:
         if min(self.k_g_per_reg, self.k_over_g_per_reg, self.f_max_g, self.max_offset_reg) <= 0:
             raise ValueError("admittance: k, k_over, f_max, max_offset > 0")
-        if min(self.deadband_g, self.tau_contact_s, self.tau_release_s, self.lead_reg, self.tip_on_counts,
-               self.hold_band_g) < 0:
-            raise ValueError("admittance: deadband, tau, lead, tip_on >= 0")
+        if min(self.deadband_g, self.tau_contact_s, self.tau_release_s, self.rate_on_g, self.tip_on_counts,
+               self.hold_band_g) < 0 or self.rate_reg_s <= 0:
+            raise ValueError("admittance: deadband, tau, rate_on, tip_on, hold_band >= 0; rate > 0")
         if not 0 < self.proximal_scale <= 1 or len(self.joints) != N or any(j not in (0, 1) for j in self.joints):
             raise ValueError("admittance: proximal_scale in (0, 1], joints = 6 x 0/1")
 
     def argv(self) -> str:
-        """마스터 --adm 값: 숫자 11 개 + joints 6 개, 쉼표."""
+        """마스터 --adm 값: 숫자 12 개 + joints 6 개, 쉼표."""
         vals = [getattr(self, f.name) for f in fields(self) if f.name != "joints"]
         return ",".join(f"{v:g}" for v in vals) + "," + ",".join(str(j) for j in self.joints)
 
@@ -69,6 +71,8 @@ class AdmState:
     y: list[float] = field(default_factory=lambda: [0.0] * N)
     f: list[float] = field(default_factory=lambda: [0.0] * N)
     bias: list[float] = field(default_factory=lambda: [0.0] * N)
+    lim: list[float] = field(default_factory=lambda: [0.0] * N)   # 접촉 중 지난 주기의 cmd
+    limiting: list[int] = field(default_factory=lambda: [0] * N)
 
 
 def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual: float, force: float,
@@ -90,9 +94,16 @@ def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual
         s.y[i] = 0.0
     s.f[i] = f
     cmd = target + s.y[i]
-    if f > 0:
-        lead = max(p.lead_reg * (1.0 - f / p.f_max_g), 0.0)
-        cmd = max(cmd, actual - lead)
+    # 10.06: a lead cap vs the measured angle held a rigid cup at ~350 g whatever the penetration (55 g per
+    # register of command past the finger). Instead, once the force comes on, the command restarts from the
+    # measured angle and closes at most rate_reg_s (1 - f / f_max) (opening at once) until the force and the offset are
+    # gone; else the offset releasing in tau_release re-closes the command at once into the object (relaxation cycle).
+    if not s.limiting[i] and f > p.rate_on_g:
+        s.limiting[i], s.lim[i] = 1, actual
+    if s.limiting[i]:
+        s.lim[i] = cmd = max(cmd, s.lim[i] - p.rate_reg_s * max(1.0 - f / p.f_max_g, 0.0) * dt)
+        if f <= 0 and s.y[i] < 1.0:
+            s.limiting[i] = 0
     return cmd
 
 
