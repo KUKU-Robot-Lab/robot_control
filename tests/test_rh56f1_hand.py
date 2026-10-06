@@ -15,7 +15,7 @@ def test_contract_has_both_inputs_and_the_admittance():
     assert cmd["admittance"]["topic"] == "/hand_<side>/angle_target"
     p = load_admittance()
     assert p.joints == (1, 1, 1, 1, 1, 0)  # thumb_1 position only
-    assert p.argv().count(",") == 17
+    assert p.argv().count(",") == 18
     assert load_protection()["current_limit_ma"] == 800 and load_protection()["finger_mode"] == 0
 
 
@@ -113,3 +113,17 @@ def test_contact_restarts_the_command_from_the_finger_then_closes_at_the_rate():
     cmd2 = adm_step(p, s, 3, 0.002, 1100.0, 1300.0, f + p.deadband_g, 300)
     assert cmd2 < cmd and cmd - cmd2 == pytest.approx(p.rate_reg_s * 0.5 * 0.002, rel=0.01)
     assert adm_step(p, s, 3, 0.002, 1500.0, 1300.0, f + p.deadband_g, 300) > 1500.0   # opening: at once (+ y)
+
+
+def test_current_wind_up_pins_the_command_at_the_finger():
+    """10.06 all fingers: ~800 g, command held past the blocked finger, current 500 -> 1084 mA."""
+    p, s = load_admittance(), AdmState()
+    for _ in range(50):
+        cmd = adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 600.0, 300, 400.0)
+    assert cmd < 1300.0                                                    # still closing at the rate
+    cmd = adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 600.0, 300, p.current_hold_ma + 50)
+    assert cmd == pytest.approx(1300.0) and s.pinned[3]                    # pinned at the measured angle
+    for _ in range(200):
+        cmd = adm_step(p, s, 3, 0.002, 1100.0, 1300.0, 600.0, 300, 0.0)   # current gone: stays pinned
+    assert cmd == pytest.approx(1300.0)
+    assert adm_step(p, s, 3, 0.002, 1500.0, 1300.0, 600.0, 300, 0.0) > 1500.0 and not s.pinned[3]  # operator opens

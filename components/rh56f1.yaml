@@ -54,7 +54,8 @@ measured:
 #   y  += a (f / k_g_per_reg + max(f - f_max_g, 0) / k_over_g_per_reg - y),  a = dt / (tau + dt)
 #         (in contact, unchanged while |f - k y| < hold_band_g)
 #   cmd = target + y;  once f > rate_on_g the command restarts from the measured angle and closes at most
-#         rate_reg_s (1 - f / f_max_g) per second (opening at once) until the force and the offset are gone
+#         rate_reg_s (1 - f / f_max_g) per second (opening at once) until the force and the offset are gone;
+#         above current_hold_ma it stops at the measured angle until the operator opens past it
 # Free space: follows the target. Contact: grip ~ k x registers the target is past the contact.
 control:
   admittance:
@@ -77,4 +78,7 @@ control:
                                  # closing command at 300 mA but a slightly opening one hardly at all (lead screw): mid grips
                                  # cycled 190-720 g with 100. Before that (10.06 right index + cup at 500 Hz), the
                                  # hand stepped 3-5 registers at a time and the force hunted 80 <-> 300 g without it
+    current_hold_ma: 650.0       # in contact above this the command is pinned at the measured angle (the lead screw holds
+                                 # the force at zero current). 10.06 all fingers: at ~800 g the current wound up 500 -> 1084 mA
+                                 # with the command held past the blocked finger; the 800 mA SDO limit did not cap it
     joints: [1, 1, 1, 1, 1, 0]   # slot order; thumb_1 position only (force sign)

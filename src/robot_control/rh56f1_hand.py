@@ -37,19 +37,20 @@ class AdmParams:
     proximal_scale: float = 1.0
     tip_on_counts: float = 20.0
     hold_band_g: float = 200.0
+    current_hold_ma: float = 650.0
     joints: tuple[int, ...] = (1, 1, 1, 1, 1, 0)
 
     def __post_init__(self) -> None:
         if min(self.k_g_per_reg, self.k_over_g_per_reg, self.f_max_g, self.max_offset_reg) <= 0:
             raise ValueError("admittance: k, k_over, f_max, max_offset > 0")
         if min(self.deadband_g, self.tau_contact_s, self.tau_release_s, self.rate_on_g, self.tip_on_counts,
-               self.hold_band_g) < 0 or self.rate_reg_s <= 0:
-            raise ValueError("admittance: deadband, tau, rate_on, tip_on, hold_band >= 0; rate > 0")
+               self.hold_band_g) < 0 or self.rate_reg_s <= 0 or self.current_hold_ma <= 0:
+            raise ValueError("admittance: deadband, tau, rate_on, tip_on, hold_band >= 0; rate, current_hold > 0")
         if not 0 < self.proximal_scale <= 1 or len(self.joints) != N or any(j not in (0, 1) for j in self.joints):
             raise ValueError("admittance: proximal_scale in (0, 1], joints = 6 x 0/1")
 
     def argv(self) -> str:
-        """마스터 --adm 값: 숫자 12 개 + joints 6 개, 쉼표."""
+        """마스터 --adm 값: 숫자 13 개 + joints 6 개, 쉼표."""
         vals = [getattr(self, f.name) for f in fields(self) if f.name != "joints"]
         return ",".join(f"{v:g}" for v in vals) + "," + ",".join(str(j) for j in self.joints)
 
@@ -73,10 +74,11 @@ class AdmState:
     bias: list[float] = field(default_factory=lambda: [0.0] * N)
     lim: list[float] = field(default_factory=lambda: [0.0] * N)   # 접촉 중 지난 주기의 cmd
     limiting: list[int] = field(default_factory=lambda: [0] * N)
+    pinned: list[int] = field(default_factory=lambda: [0] * N)   # 전류가 넘어 실제 각도에 고정됨
 
 
 def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual: float, force: float,
-             tip: float) -> float:
+             tip: float, current: float = -1.0) -> float:
     """한 축 한 주기 — rh56f1_admittance.h adm_step 과 같다."""
     f = force - s.bias[i] - p.deadband_g
     if f < 0:
@@ -98,12 +100,21 @@ def adm_step(p: AdmParams, s: AdmState, i: int, dt: float, target: float, actual
     # register of command past the finger). Instead, once the force comes on, the command restarts from the
     # measured angle and closes at most rate_reg_s (1 - f / f_max) (opening at once) until the force and the offset are
     # gone; else the offset releasing in tau_release re-closes the command at once into the object (relaxation cycle).
+    # 10.06 all fingers: with the force near f_max and the command held a few registers past the blocked finger, the
+    # firmware's position loop kept winding the current up (500 -> 1084 mA at ~800 g; the 800 mA SDO limit did not cap
+    # it). The lead screw holds the force with no current, so above current_hold_ma the command is pinned at the
+    # measured angle (no closing) until the operator opens past it or the contact is gone. current < 0: unknown.
     if not s.limiting[i] and f > p.rate_on_g:
         s.limiting[i], s.lim[i] = 1, actual
     if s.limiting[i]:
-        s.lim[i] = cmd = max(cmd, s.lim[i] - p.rate_reg_s * max(1.0 - f / p.f_max_g, 0.0) * dt)
+        if current > p.current_hold_ma:
+            s.pinned[i], s.lim[i] = 1, max(s.lim[i], actual)
+        if s.pinned[i] and cmd > s.lim[i]:
+            s.pinned[i] = 0
+        rate = 0.0 if s.pinned[i] else p.rate_reg_s * max(1.0 - f / p.f_max_g, 0.0)
+        s.lim[i] = cmd = max(cmd, s.lim[i] - rate * dt)
         if f <= 0 and s.y[i] < 1.0:
-            s.limiting[i] = 0
+            s.limiting[i] = s.pinned[i] = 0
     return cmd
 
 
