@@ -32,7 +32,7 @@ class AdmParams:
     k_over_g_per_reg: float = 0.36
     lead_reg: float = 11.0
     max_offset_reg: float = 880.0
-    proximal_scale: float = 0.7
+    proximal_scale: float = 1.0
     tip_on_counts: float = 20.0
     hold_band_g: float = 100.0
     joints: tuple[int, ...] = (1, 1, 1, 1, 1, 0)

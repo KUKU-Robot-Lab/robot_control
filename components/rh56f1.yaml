@@ -65,7 +65,8 @@ control:
     k_over_g_per_reg: 0.36
     lead_reg: 11.0               # ~0.02 rad
     max_offset_reg: 880.0
-    proximal_scale: 0.7
+    proximal_scale: 1.0          # 10.06 user (A): the grip follows the actuator reading wherever it touches; a link 1
+                                 # contact then presses ~1/0.7 harder than a tip one (manual 2.5.12), 0.7 = per contact force
     tip_on_counts: 20.0          # 0.2 N
     hold_band_g: 100.0           # in contact, |f - k y| below this keeps y: 10.06 right index + cup at 500 Hz, the
                                  # hand stepped 3-5 registers at a time and the force hunted 80 <-> 300 g without it

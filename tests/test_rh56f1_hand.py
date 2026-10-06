@@ -40,7 +40,7 @@ def test_rigid_contact_settles_within_a_register():
 
 
 def test_link_1_contact_counts_more_and_soft_cap():
-    p = AdmParams(hold_band_g=0.0)
+    p = AdmParams(hold_band_g=0.0, proximal_scale=0.7)
     a, b = AdmState(), AdmState()
     for _ in range(5000):
         adm_step(p, a, 3, 0.002, 1300.0, 1300.0, 440.0, 300)
