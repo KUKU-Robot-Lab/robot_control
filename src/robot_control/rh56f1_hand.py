@@ -27,7 +27,7 @@ COMPONENT = Path(__file__).resolve().parents[2] / "components" / "rh56f1.yaml"
 class AdmParams:
     k_g_per_reg: float = 3.6
     deadband_g: float = 40.0
-    tau_contact_s: float = 1.0
+    tau_contact_s: float = 0.3
     tau_release_s: float = 0.15
     f_max_g: float = 800.0
     k_over_g_per_reg: float = 0.36

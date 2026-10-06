@@ -60,7 +60,8 @@ control:
   admittance:
     k_g_per_reg: 3.6             # ~2000 g/rad on the fingers
     deadband_g: 40.0
-    tau_contact_s: 1.0           # 10.06: 0.5 s in a 120 Hz outer loop cycled 100-440 g on a rigid cup
+    tau_contact_s: 0.3           # 10.06 evening trial (1.0: 0.5 rad/s operator overshot ~1.15 kg on a rigid cup); 0.5 s in a
+                                 # 120 Hz outer loop with the old lead cap cycled 100-440 g
     tau_release_s: 0.15
     f_max_g: 800.0
     k_over_g_per_reg: 0.36
