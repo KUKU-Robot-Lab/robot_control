@@ -1,18 +1,69 @@
 name: rh56f1
-# Inspire RH56F1, six linear actuators per hand, one hand per port.
-# Driver: ros_ws/src/inspire_rh56f1 (vendor inspire_control_ros2, copied
-# unchanged from sim2real; launch per hand with rh56f1_driver
-# rh56f1_{right,left}_driver.launch.py transport:=rs485|canfd). Profile:
-# src/robot_control/profiles/openarm_rh56f1.yaml. Built, not yet run against
-# the hands on arm4090 (ports, Hand_ID, baud, CANFD converter unverified).
-status: driver_integrated_hardware_unverified
-# The canonical contract (rad) the profile declares. The driver below it
-# speaks vendor units: angle 0.1 deg (fingers 900..1740, large = open), force
-# in g at the sensor, speed 0..4000 dimensionless, -1 = leave the actuator.
+# Inspire RH56F1, six linear actuators (lead screw + linkage, non-backdrivable) per hand, one hand per NIC.
+# Canonical hand control contract — 2026-10-06 (updated from the RS485 snapshot of a35f8e9).
+#
+# Real hands run over EtherCAT (500 Hz PDO): sim2real deploy/policy_control rh56f1_ecat_node + the C master
+# tools/ethercat/rh56f1_ecat_master (sim2real 0ddeb54 .. cd542da). ros_ws/src/inspire_rh56f1 here is kept for
+# the rh56f1_interfaces messages and as the RS485/CANFD fallback only (a8328a1).
+# Measurements behind the numbers: motion_acq docs/RH56F1_HAND_TUNING.md (both hands, 10.06).
+status: ethercat_verified_admittance_untuned
 command: {interface: position, unit: rad}
 state: {position: rad, velocity: rad/s, effort: N*m}
 driver:
-  command: {topic: /hand_<side>/angle_set, type: rh56f1_interfaces/msg/SetAngle1, unit: 0.1deg}
-  state: {topic: /hand_<side>/angle_actual, type: rh56f1_interfaces/msg/GetAngleAct1, unit: 0.1deg}
-  transports: [rs485, canfd]
+  transport: ethercat            # rs485 / canfd: vendor fallback (ros_ws/src/inspire_rh56f1)
+  units: {angle: 0.1deg, force: g, current: mA, speed: "0..4000 (2000 = full stroke in 1 s)", touch: 0.01N}
+  # angle registers close downward: fingers 1740 open .. 900 closed (~550 reg/rad), thumb_2 1350 .. 1100
+  # (~527 reg/rad), thumb_1 1473/1410 (left/right, away from the palm) .. 615/600 (across it); -1 = leave.
+  slot_order: [pinky, ring, middle, index, thumb_2, thumb_1]
+  # Two command inputs, same message and units. Every user (teleop, policies, pd, replay) picks one.
+  command:
+    position: {topic: /hand_<side>/angle_set, type: rh56f1_interfaces/msg/SetAngle1}
+    admittance: {topic: /hand_<side>/angle_target, type: rh56f1_interfaces/msg/SetAngle1}
+  state:
+    angle: {topic: /hand_<side>/angle_actual, type: rh56f1_interfaces/msg/GetAngleAct1}
+    force: {topic: /hand_<side>/force_actual, type: rh56f1_interfaces/msg/GetForceAct1}
+    current: {topic: /hand_<side>/current_actual, type: rh56f1_interfaces/msg/GetCurrentAct1}
+    touch: {topic: /hand_<side>/touch_data, type: rh56f1_interfaces/msg/TouchData1}
+    status: {topic: /hand_<side>/ecat_status, type: std_msgs/msg/String}
+    admittance_offset: {topic: /hand_<side>/admittance_offset, type: std_msgs/msg/Int32MultiArray}
 safety: {watchdog_sec: 0.25, error_action: hold_last_safe_pose, estop: required}
+
+# Written over SDO at driver start (PREOP) and read back; the driver refuses OP on a mismatch.
+# SDO is refused while the hand is in OP (10.06: "mailbox protocol not supported") — start-time only.
+protection:
+  clear_error: true
+  current_limit_ma: 800          # per actuator; 10.06 free motion <= 320 mA, 900 g grip 770-950 mA
+  finger_mode: 0                 # 0 position. 1 force loop ignores the angle; 2 impedance is slow and trembles
+  force_zero_calibration: on_request   # --force-calibrate, empty hand, 6 s (10.06 both hands: rest -> ~0 g)
+
+# Measured hand behaviour (10.06, both hands, cup) — what a simulator must reproduce.
+measured:
+  force_sensor: actuator load as fingertip-equivalent g (link 1 contact = larger real force, manual 2.5.12)
+  force_set_honoured_in_mode_0: false          # 300-1000 g set, 1.6-1.85 kg reached
+  saturation_g: [1100, 1850]                   # mode 0, target far past the contact
+  contact_stiffness_g_per_reg: [3, 55]         # object and link dependent; thumb_2 ~55, rigid cup ~100 at the tip
+  speed_changes_overshoot: false               # 150..2000, unlike RH56DFX (arXiv 2603.08988)
+  holds_force_with_zero_current: true          # lead screw
+  mode_1_force_ratio: {fingers: 1.0, thumb_2: 0.64}
+  thumb_1_force_sign: negative_under_outward_load
+
+# Canonical per-finger admittance, applied by the driver at its cycle (500 Hz) to the axes commanded on
+# angle_target. Reference implementation: robot_control.rh56f1_hand (Python); the sim2real C master must give
+# the same numbers (sim2real test). Per axis and cycle, in registers (closing = smaller):
+#   f   = max(force - rest - deadband_g, 0)   (/ proximal_scale while the fingertip reads < tip_on_counts)
+#   y  += a (f / k_g_per_reg + max(f - f_max_g, 0) / k_over_g_per_reg - y),  a = dt / (tau + dt)
+#   cmd = target + y;  in contact cmd >= actual - lead_reg (1 - f / f_max_g)
+# Free space: follows the target. Contact: grip ~ k x registers the target is past the contact.
+control:
+  admittance:
+    k_g_per_reg: 3.6             # ~2000 g/rad on the fingers
+    deadband_g: 40.0
+    tau_contact_s: 1.0           # 10.06: 0.5 s in a 120 Hz outer loop cycled 100-440 g on a rigid cup
+    tau_release_s: 0.15
+    f_max_g: 800.0
+    k_over_g_per_reg: 0.36
+    lead_reg: 11.0               # ~0.02 rad
+    max_offset_reg: 880.0
+    proximal_scale: 0.7
+    tip_on_counts: 20.0          # 0.2 N
+    joints: [1, 1, 1, 1, 1, 0]   # slot order; thumb_1 position only (force sign)
