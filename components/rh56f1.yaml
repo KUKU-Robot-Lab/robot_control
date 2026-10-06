@@ -73,6 +73,8 @@ control:
     proximal_scale: 1.0          # 10.06 user (A): the grip follows the actuator reading wherever it touches; a link 1
                                  # contact then presses ~1/0.7 harder than a tip one (manual 2.5.12), 0.7 = per contact force
     tip_on_counts: 20.0          # 0.2 N
-    hold_band_g: 100.0           # in contact, |f - k y| below this keeps y: 10.06 right index + cup at 500 Hz, the
+    hold_band_g: 200.0           # in contact, |f - k y| below this keeps y. 10.06 evening (tau 0.3): the hand answers a
+                                 # closing command at 300 mA but a slightly opening one hardly at all (lead screw): mid grips
+                                 # cycled 190-720 g with 100. Before that (10.06 right index + cup at 500 Hz), the
                                  # hand stepped 3-5 registers at a time and the force hunted 80 <-> 300 g without it
     joints: [1, 1, 1, 1, 1, 0]   # slot order; thumb_1 position only (force sign)

@@ -36,7 +36,7 @@ class AdmParams:
     max_offset_reg: float = 880.0
     proximal_scale: float = 1.0
     tip_on_counts: float = 20.0
-    hold_band_g: float = 100.0
+    hold_band_g: float = 200.0
     joints: tuple[int, ...] = (1, 1, 1, 1, 1, 0)
 
     def __post_init__(self) -> None:

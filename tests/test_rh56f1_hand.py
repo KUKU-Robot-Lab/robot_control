@@ -36,7 +36,7 @@ def test_rigid_contact_settles_within_a_register():
         actual += max(min(cmd - actual, 2.0), -2.0)
         forces.append(force)
     tail = forces[-500:]
-    assert max(tail) - min(tail) <= 100.0 and 250 < tail[-1] < 500  # k x penetration, + up to the hold band
+    assert max(tail) - min(tail) <= 100.0 and abs(tail[-1] - 360.0) <= p.hold_band_g + p.deadband_g  # k x penetration, within the hold band
 
 
 def test_link_1_contact_counts_more_and_soft_cap():
